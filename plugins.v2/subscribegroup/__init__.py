@@ -335,7 +335,8 @@ class SubscribeGroup(_PluginBase):
                         update_dict['include'] = resource_team
                 # 站点
                 if "站点" in self._update_details and (
-                        not subscribe.sites or (subscribe.sites and len(json.loads(subscribe.sites)) == 0)):
+                        # not subscribe.sites or (subscribe.sites and len(json.loads(subscribe.sites)) == 0)):
+                        not subscribe.sites or (subscribe.sites and len(subscribe.sites) == 0)):
                     # 站点 判断是否在订阅站点范围内
                     rss_sites = self.systemconfig.get(SystemConfigKey.RssSites) or []
                     if _torrent and _torrent.site and int(_torrent.site) in rss_sites:
