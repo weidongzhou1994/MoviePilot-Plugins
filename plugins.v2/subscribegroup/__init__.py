@@ -20,7 +20,7 @@ class SubscribeGroup(_PluginBase):
     # 插件图标
     plugin_icon = "teamwork.png"
     # 插件版本
-    plugin_version = "3.8.6"
+    plugin_version = "3.8.7"
     # 插件作者
     plugin_author = "thsrite"
     # 作者主页
