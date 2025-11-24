@@ -48,7 +48,7 @@ class SubscribeAssistant(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/InfinityPacer/MoviePilot-Plugins/main/icons/subscribeassistant.png"
     # 插件版本
-    plugin_version = "3.7.1"
+    plugin_version = "3.7.2"
     # 插件作者
     plugin_author = "InfinityPacer"
     # 作者主页
@@ -3914,7 +3914,7 @@ class SubscribeAssistant(_PluginBase):
             return
 
         # 更新订阅字典
-        subscribe_dict["best_version"] = True
+        subscribe_dict["best_version"] = 1
         subscribe_dict["username"] = self.plugin_name
         subscribe_dict["state"] = "N"
         fields_to_pop = [
