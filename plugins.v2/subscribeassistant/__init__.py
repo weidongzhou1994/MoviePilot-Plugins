@@ -48,7 +48,7 @@ class SubscribeAssistant(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/InfinityPacer/MoviePilot-Plugins/main/icons/subscribeassistant.png"
     # 插件版本
-    plugin_version = "3.7.2"
+    plugin_version = "3.7.3"
     # 插件作者
     plugin_author = "InfinityPacer"
     # 作者主页
@@ -1398,8 +1398,12 @@ class SubscribeAssistant(_PluginBase):
         """
         下载检查
         """
-        if not (self._auto_download_delete or self._manual_delete_listen or
-                self._tracker_response_listen or self._auto_download_pending):
+        try:
+            if not (self._auto_download_delete or self._manual_delete_listen or
+                    self._tracker_response_listen or self._auto_download_pending):
+                return
+        except Exception as e:
+            logger.error(f"下载检查执行失败，错误信息：{str(e)}")
             return
 
         logger.info("开始清理超时种子记录...")
@@ -2334,7 +2338,7 @@ class SubscribeAssistant(_PluginBase):
             return True, 0
 
         # 如果种子的已下载大小大于目标大小，说明已完成
-        if torrent_info.get("downloaded") >= torrent_info.get("target_size"):
+        if torrent_info.get("downloaded") >= torrent_info.get("target_size") * 0.8:
             return True, 0
 
         return False, torrent_info.get("dltime")
