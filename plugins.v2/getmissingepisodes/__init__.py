@@ -176,7 +176,7 @@ class GetMissingEpisodes(_PluginBase):
     plugin_name = "剧集补全&新季追更"
     plugin_desc = "检测指定剧集库，对有新季或存在集缺失的剧集自动订阅补全"
     plugin_icon = "https://raw.githubusercontent.com/andyxu8023/MoviePilot-Plugins/main/icons/EpisodeNoExist.png"
-    plugin_version = "2.3.9"  # 更新版本号
+    plugin_version = "2.3.10"  # 更新版本号
     plugin_author = "boeto，左岸，qiniuweihe"
     author_url = "https://github.com/andyxu8023"
     plugin_config_prefix = "getmissingepisodes_"
@@ -939,10 +939,6 @@ class GetMissingEpisodes(_PluginBase):
         title_season = f"{title} ({year}) 第 {season} 季"
         logger.info(f"开始检查 {title_season} 是否已添加订阅")
 
-        extra_params = self._downOper.get_last_by(mtype=MediaType.TV.value, title=title, year=year, season=season, episode=None, tmdbid=tmdbid)
-        extra_params = extra_params[0].to_dict() if hasattr(extra_params[0], 'to_dict') else None
-        logger.info(f"test-{extra_params}")
-
         save_path_replaced = None
         if self._save_path_replaces and save_path:
             for _save_path_replace in self._save_path_replaces:
@@ -962,7 +958,7 @@ class GetMissingEpisodes(_PluginBase):
             logger.info(f"{title_season} 订阅已存在")
             return True
 
-        logger.info(f"开始添加订阅: {title_season}")
+        logger.info(f"开始添加订阅: {title_season}-{save_path}")
 
         if not isinstance(season, int):
             try:
@@ -973,6 +969,7 @@ class GetMissingEpisodes(_PluginBase):
 
         # 优先使用实际总集数，如果未提供则使用筛选后的总集数
         final_total_episode = total_episode_unfiltered or total_episode
+
 
         # 添加订阅
         try:
