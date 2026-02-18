@@ -4045,8 +4045,11 @@ class SubscribeAssistant(_PluginBase):
 
         # 检查订阅状态是否可处理
         if subscribe.state not in ["N", "R", "P"]:
-            logger.debug(
-                f"{self.__format_subscribe(subscribe)} 当前状态为 {subscribe.state}，状态不允许处理，跳过处理")
+            try:
+                logger.debug(
+                    f"{self.__format_subscribe(subscribe)} 当前状态为 {subscribe.state}，状态不允许处理，跳过处理")
+            except Exception as e:
+                pass
             return False
         return True
 
