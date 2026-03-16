@@ -19,7 +19,7 @@ class MediaServerRefresh(_PluginBase):
     # 插件描述
     plugin_desc = "入库后自动刷新Emby/Jellyfin/Plex服务器海报墙。"
     # 插件图标
-    plugin_icon = "refresh2.png"
+    plugin_icon = "https://github.com/jxxghp/MoviePilot-Plugins/tree/main/icons/refresh2.png"
     # 插件版本
     plugin_version = "2.2"
     # 插件作者
