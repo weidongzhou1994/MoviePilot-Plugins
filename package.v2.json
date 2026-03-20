@@ -3,11 +3,12 @@
     "name": "豆瓣榜单订阅Plus",
     "description": "豆瓣热门榜单增强版",
     "labels": "订阅",
-    "version": "3.0.4",
+    "version": "3.0.5",
     "icon": "https://raw.githubusercontent.com/boeto/MoviePilot-Plugins/main/icons/DouBanRankPlus.png",
     "author": "boeto",
     "level": 2,
     "history": {
+      "v3.0.5": "diy 修改",
       "v3.0.4": "diy 修改",
       "v3.0.3": "diy 修改",
       "v3.0.2": "diy 修改",
