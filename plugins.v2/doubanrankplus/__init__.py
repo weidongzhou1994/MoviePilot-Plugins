@@ -1439,8 +1439,13 @@ class DoubanRankPlus(_PluginBase):
                                 f"开始通过豆瓣ID {douban_id} 获取 {title} 的TMDB信息, 类型: {meta.type}"
                             )
 
+                            # tmdbinfo, is_ip_rate_limit = (
+                            #     self.__get_tmdbinfo_by_doubanid(
+                            #         doubanid=douban_id, mtype=meta.type
+                            #     )
+                            # )
                             tmdbinfo, is_ip_rate_limit = (
-                                self.__get_tmdbinfo_by_doubanid(
+                                self.__get_tmdbinfo_by_doubanid_mp(
                                     doubanid=douban_id, mtype=meta.type
                                 )
                             )
@@ -1989,6 +1994,17 @@ class DoubanRankPlus(_PluginBase):
             "vote": 0.0,
         }
         return history_payload
+    
+
+    def __get_tmdbinfo_by_doubanid_mp(self, doubanid: str, mtype: MediaType | None = None):
+        """
+        根据豆瓣ID获取TMDB信息，使用原MP的API
+        """
+        tmdbinfo = self.mediachain.get_tmdbinfo_by_doubanid_mp(doubanid=doubanid, mtype=mtype)
+        if tmdbinfo:
+            logger.debug(f"通过豆瓣ID {doubanid} 获取到TMDB信息: {tmdbinfo}")
+            return tmdbinfo, False
+        return tmdbinfo, True
 
     def __get_tmdbinfo_by_doubanid(
         self, doubanid: str, mtype: MediaType | None = None
