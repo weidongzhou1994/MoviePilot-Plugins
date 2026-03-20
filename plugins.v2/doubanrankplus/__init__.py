@@ -81,7 +81,7 @@ class DoubanRankPlus(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/boeto/MoviePilot-Plugins/main/icons/DouBanRankPlus.png"
     # 插件版本
-    plugin_version = "3.0.1"
+    plugin_version = "3.0.2"
     # 插件作者
     plugin_author = "boeto"
     # 作者主页
@@ -2000,7 +2000,7 @@ class DoubanRankPlus(_PluginBase):
         """
         根据豆瓣ID获取TMDB信息，使用原MP的API
         """
-        tmdbinfo = self.mediachain.get_tmdbinfo_by_doubanid_mp(doubanid=doubanid, mtype=mtype)
+        tmdbinfo = self.mediachain.get_tmdbinfo_by_doubanid(doubanid=doubanid, mtype=mtype)
         if tmdbinfo:
             logger.debug(f"通过豆瓣ID {doubanid} 获取到TMDB信息: {tmdbinfo}")
             return tmdbinfo, False
