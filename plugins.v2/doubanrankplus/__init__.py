@@ -81,7 +81,7 @@ class DoubanRankPlus(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/boeto/MoviePilot-Plugins/main/icons/DouBanRankPlus.png"
     # 插件版本
-    plugin_version = "3.0.2"
+    plugin_version = "3.0.3"
     # 插件作者
     plugin_author = "boeto"
     # 作者主页
@@ -1446,7 +1446,7 @@ class DoubanRankPlus(_PluginBase):
                             # )
                             tmdbinfo, is_ip_rate_limit = (
                                 self.__get_tmdbinfo_by_doubanid_mp(
-                                    doubanid=douban_id, mtype=meta.type
+                                    doubanid=douban_id, mtype=meta.type, title=meta.title, year=meta.year
                                 )
                             )
 
@@ -1996,7 +1996,7 @@ class DoubanRankPlus(_PluginBase):
         return history_payload
     
 
-    def __get_tmdbinfo_by_doubanid_mp(self, doubanid: str, mtype: MediaType | None = None):
+    def __get_tmdbinfo_by_doubanid_mp(self, doubanid: str, mtype: MediaType | None = None, title: str | None = None, year: str | None = None):
         """
         根据豆瓣ID获取TMDB信息，使用原MP的API
         """
@@ -2004,7 +2004,23 @@ class DoubanRankPlus(_PluginBase):
         if tmdbinfo:
             logger.debug(f"通过豆瓣ID {doubanid} 获取到TMDB信息: {tmdbinfo}")
             return tmdbinfo, False
-        return tmdbinfo, True
+        elif title is not None:
+            tmdbinfos = self.mediachain.search(title)
+            if len(tmdbinfos) == 0:
+                return None, True
+            if len(tmdbinfos) == 1:
+                tmdbinfo = tmdbinfos[0]
+                return tmdbinfo, False
+            elif len(tmdbinfos) > 1:
+                if year is not None:
+                    tmdbinfo = [
+                        info for info in tmdbinfos if str(info.get("year", "")) == str(year)
+                    ][0]
+                else:
+                    tmdbinfo = tmdbinfos[0]
+                return tmdbinfo, False
+            else:
+                return self.__get_tmdbinfo_by_doubanid(doubanid=doubanid, mtype=mtype)
 
     def __get_tmdbinfo_by_doubanid(
         self, doubanid: str, mtype: MediaType | None = None
