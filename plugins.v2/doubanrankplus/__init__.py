@@ -81,7 +81,7 @@ class DoubanRankPlus(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/boeto/MoviePilot-Plugins/main/icons/DouBanRankPlus.png"
     # 插件版本
-    plugin_version = "3.0.8"
+    plugin_version = "3.0.9"
     # 插件作者
     plugin_author = "boeto"
     # 作者主页
@@ -2013,9 +2013,13 @@ class DoubanRankPlus(_PluginBase):
                 return tmdbinfo, False
             elif len(tmdbinfos) > 1:
                 if year is not None:
-                    tmdbinfo = [
+                    _tmdbinfos = [
                         info for info in tmdbinfos if str(info.year) == str(year)
-                    ][0].to_dict()
+                    ]
+                    if len(_tmdbinfos) > 0:
+                        tmdbinfo = _tmdbinfos[0].to_dict()
+                    else:
+                        tmdbinfo = tmdbinfos[0].to_dict()
                 else:
                     tmdbinfo = tmdbinfos[0].to_dict()
                 tmdbinfo["id"] = tmdbinfo["tmdb_id"] 
