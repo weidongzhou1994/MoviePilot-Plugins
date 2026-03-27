@@ -81,7 +81,7 @@ class DoubanRankPlus(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/boeto/MoviePilot-Plugins/main/icons/DouBanRankPlus.png"
     # 插件版本
-    plugin_version = "3.0.9"
+    plugin_version = "3.0.10"
     # 插件作者
     plugin_author = "boeto"
     # 作者主页
@@ -2007,11 +2007,11 @@ class DoubanRankPlus(_PluginBase):
         elif title is not None:
             _, tmdbinfos = self.mediachain.search(title)
             if len(tmdbinfos) == 0:
-                return None, True
+                return self.__get_tmdbinfo_by_doubanid(doubanid=doubanid, mtype=mtype)
             if len(tmdbinfos) == 1:
                 tmdbinfo = tmdbinfos[0].to_dict()
                 return tmdbinfo, False
-            elif len(tmdbinfos) > 1:
+            else:
                 if year is not None:
                     _tmdbinfos = [
                         info for info in tmdbinfos if str(info.year) == str(year)
@@ -2026,8 +2026,6 @@ class DoubanRankPlus(_PluginBase):
                 tmdbinfo["media_type"] = MediaType.TV if tmdbinfo.get("type", "") == "电视剧" else MediaType.MOVIE 
                 logger.info(f"通过标题 {title} 和年份 {year} 获取到TMDB信息: {tmdbinfo}")
                 return tmdbinfo, False
-            else:
-                return self.__get_tmdbinfo_by_doubanid(doubanid=doubanid, mtype=mtype)
 
     def __get_tmdbinfo_by_doubanid(
         self, doubanid: str, mtype: MediaType | None = None
