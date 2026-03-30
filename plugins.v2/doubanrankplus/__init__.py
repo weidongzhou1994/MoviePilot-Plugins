@@ -81,7 +81,7 @@ class DoubanRankPlus(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/boeto/MoviePilot-Plugins/main/icons/DouBanRankPlus.png"
     # 插件版本
-    plugin_version = "3.0.10"
+    plugin_version = "3.0.11"
     # 插件作者
     plugin_author = "boeto"
     # 作者主页
@@ -1450,6 +1450,13 @@ class DoubanRankPlus(_PluginBase):
                                 )
                             )
 
+                            if not tmdbinfo and not is_ip_rate_limit and len(meta.origintitle) > 0:
+                                tmdbinfo, is_ip_rate_limit = (
+                                    self.__get_tmdbinfo_by_doubanid_mp(
+                                        doubanid=douban_id, mtype=meta.type, title=meta.origintitle, year=meta.year
+                                    )
+                                )
+
                             if not tmdbinfo and not is_ip_rate_limit:
                                 logger.warn(
                                     f"未识别到 {title} 的TMDB信息, 豆瓣ID: {douban_id} "
@@ -1785,6 +1792,7 @@ class DoubanRankPlus(_PluginBase):
                 try:
                     # 标题
                     title = DomUtils.tag_value(item, "title", default="")
+                    origintitle = DomUtils.tag_value(item, "origintitle", default="")
                     # 链接
                     link = DomUtils.tag_value(item, "link", default="")
                     if not title and not link:
@@ -1821,6 +1829,7 @@ class DoubanRankPlus(_PluginBase):
 
                     rss_info: RssInfo = {
                         "title": title,
+                        "origintitle": origintitle,
                         "link": link,
                         "mtype": mtype,
                         "year": year,
