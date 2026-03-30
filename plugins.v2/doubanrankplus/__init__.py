@@ -81,7 +81,7 @@ class DoubanRankPlus(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/boeto/MoviePilot-Plugins/main/icons/DouBanRankPlus.png"
     # 插件版本
-    plugin_version = "3.0.11"
+    plugin_version = "3.0.12"
     # 插件作者
     plugin_author = "boeto"
     # 作者主页
@@ -1373,6 +1373,7 @@ class DoubanRankPlus(_PluginBase):
 
                     logger.debug(f"rss_info:::{rss_info}")
                     title = rss_info.get("title")
+                    origintitle = rss_info.get("origintitle")
                     if not title:
                         logger.warn("标题为空，无法处理")
                         continue
@@ -1450,10 +1451,10 @@ class DoubanRankPlus(_PluginBase):
                                 )
                             )
 
-                            if not tmdbinfo and not is_ip_rate_limit and len(meta.origintitle) > 0:
+                            if not tmdbinfo and not is_ip_rate_limit and len(origintitle) > 0:
                                 tmdbinfo, is_ip_rate_limit = (
                                     self.__get_tmdbinfo_by_doubanid_mp(
-                                        doubanid=douban_id, mtype=meta.type, title=meta.origintitle, year=meta.year
+                                        doubanid=douban_id, mtype=meta.type, title=origintitle, year=meta.year
                                     )
                                 )
 
