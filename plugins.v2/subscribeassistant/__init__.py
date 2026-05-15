@@ -57,7 +57,7 @@ class SubscribeAssistant(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/InfinityPacer/MoviePilot-Plugins/main/icons/subscribeassistant.png"
     # 插件版本
-    plugin_version = "3.13.1"
+    plugin_version = "3.13.2"
     # 插件作者
     plugin_author = "InfinityPacer"
     # 作者主页
@@ -1124,7 +1124,7 @@ class SubscribeAssistant(_PluginBase):
                                                         'props': {
                                                             'model': 'best_version_full',
                                                             'label': '默认全集洗版',
-                                                            'hint': '默认洗版为全集洗版,避免分集洗版导致的资源不同意',
+                                                            'hint': '全集洗版,避免分集洗版导致的资源不统一',
                                                             'persistent-hint': True
                                                         }
                                                     }
