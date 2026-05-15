@@ -195,6 +195,7 @@ class SubscribeAssistant(_PluginBase):
         self.transferhistory_oper = TransferHistoryOper()
         self.subscribe_oper = SubscribeOper()
         self._recognition_guard_notify_cache = {}
+        self.category = CategoryHelper()
         if not config:
             return
 
@@ -1217,8 +1218,7 @@ class SubscribeAssistant(_PluginBase):
                                                         }
                                                     }
                                                 ]
-                                            }
-                                            ,
+                                            },
                                             {
                                                 'component': 'VCol',
                                                 'props': {
