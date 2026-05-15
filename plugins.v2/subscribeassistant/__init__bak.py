@@ -1,10 +1,3 @@
-"""
-@Date         : 2026-05-15
-@LastEditTime : 2026-05-15
-@Author       : Weidong Zhou
-@Function     : 
-"""
-import io
 import json
 import random
 import re
@@ -18,7 +11,6 @@ import pytz
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from packaging.version import Version
-from ruamel.yaml import YAML, YAMLError
 
 from app import schemas
 from app.chain.storage import StorageChain
@@ -44,7 +36,6 @@ from app.schemas.subscribe import Subscribe as SchemaSubscribe
 from app.schemas.types import EventType, ChainEventType, MediaType, NotificationType
 from app.utils.string import StringUtils
 
-from .recognition_guard import RecognitionGuard, RecognitionGuardConfig, RecognitionGuardDecision
 
 lock = threading.RLock()
 
@@ -57,7 +48,7 @@ class SubscribeAssistant(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/InfinityPacer/MoviePilot-Plugins/main/icons/subscribeassistant.png"
     # 插件版本
-    plugin_version = "3.13"
+    plugin_version = "3.7.3"
     # 插件作者
     plugin_author = "InfinityPacer"
     # 作者主页
@@ -99,36 +90,6 @@ class SubscribeAssistant(_PluginBase):
     _skip_deletion = True
     # 超时删除时间（小时）
     _download_timeout = 3
-    # 下载超时窗口内要求的最小进度增长百分比
-    _download_timeout_progress_threshold = 5
-    # 同一订阅范围连续低进度超时后的人工处理保护次数
-    _download_timeout_retry_limit = 3
-    # 连续超时达到上限后的单种忽略时间（小时）
-    _download_timeout_ignore_hours = 48
-    # 识别增强模式
-    _recognition_guard_mode = "off"
-    # 识别增强目标形态
-    _recognition_guard_target_mode = "auto"
-    # 识别增强通知模式：off关闭、summary汇总拦截、detail明细拦截、all观察和明细。
-    _recognition_guard_notify = "off"
-    # 同一订阅同一原因的识别增强通知限频秒数，避免自动订阅持续重试时刷屏。
-    _recognition_guard_notify_interval = 60 * 60
-    # 识别增强通知限频缓存，运行期按订阅和原因记录最近通知时间。
-    _recognition_guard_notify_cache = None
-    # 识别增强同名电影/剧集保护开关
-    _recognition_guard_same_name_protection = True
-    # 识别增强电影年份校验策略
-    _recognition_guard_movie_year_mode = "loose"
-    # 识别增强剧集年份校验策略
-    _recognition_guard_tv_year_mode = "season_first"
-    # 识别增强缺少年份处理策略
-    _recognition_guard_no_year_action = "allow"
-    # 识别增强 TMDB 二次识别策略
-    _recognition_guard_tmdb_recheck_mode = "off"
-    # 识别增强二次识别缓存上限
-    _recognition_guard_cache_maxsize = 100000
-    # 识别增强关键字 YAML 配置
-    _recognition_guard_keyword_config = ""
     # 超时记录清理时间（小时）
     _timeout_history_cleanup = 24
     # 排除标签
@@ -177,8 +138,6 @@ class SubscribeAssistant(_PluginBase):
     _auto_best_cron = None
     # 洗版天数
     _auto_best_remaining_days = 60
-    # 默认全集洗版
-    _best_version_full = False
     # 重置任务
     _reset_task = False
     # 定时器
@@ -194,7 +153,7 @@ class SubscribeAssistant(_PluginBase):
         self.downloadhistory_oper = DownloadHistoryOper()
         self.transferhistory_oper = TransferHistoryOper()
         self.subscribe_oper = SubscribeOper()
-        self._recognition_guard_notify_cache = {}
+        self.category = CategoryHelper()
         if not config:
             return
 
@@ -232,29 +191,6 @@ class SubscribeAssistant(_PluginBase):
         self._auto_best_cron = config.get("auto_best_cron", "0 15 * * *")
         self._download_check_interval = self.__get_float_config(config, "download_check_interval", 5)
         self._download_timeout = self.__get_float_config(config, "download_timeout", 3)
-        self._download_timeout_progress_threshold = self.__get_float_config(
-            config, "download_timeout_progress_threshold", 5)
-        self._download_timeout_retry_limit = self.__get_int_config(config, "download_timeout_retry_limit", 3)
-        self._recognition_guard_mode = config.get("recognition_guard_mode", "off")
-        self._recognition_guard_target_mode = config.get("recognition_guard_target_mode", "auto")
-        self._recognition_guard_notify = self.__normalize_recognition_guard_notify(
-            config.get("recognition_guard_notify", "off")
-        )
-        same_name_protection_default = self.__get_bool_config(config, "recognition_guard_same_name_mode", True)
-        self._recognition_guard_same_name_protection = self.__get_bool_config(
-            config,
-            "recognition_guard_same_name_protection",
-            same_name_protection_default,
-        )
-        self._recognition_guard_movie_year_mode = config.get("recognition_guard_movie_year_mode", "loose")
-        self._recognition_guard_tv_year_mode = config.get("recognition_guard_tv_year_mode", "season_first")
-        self._recognition_guard_no_year_action = config.get("recognition_guard_no_year_action", "allow")
-        self._recognition_guard_tmdb_recheck_mode = config.get("recognition_guard_tmdb_recheck_mode", "off")
-        self._recognition_guard_cache_maxsize = self.__get_int_config(
-            config, "recognition_guard_cache_maxsize", 100000)
-        self._recognition_guard_keyword_config = config.get("recognition_guard_keyword_config")
-        if not self._recognition_guard_keyword_config:
-            self._recognition_guard_keyword_config = self.__get_default_recognition_guard_keyword_config()
         self._timeout_history_cleanup = self.__get_float_config(config, "timeout_history_cleanup", 0) or None
         self._auto_tv_pending_days = self.__get_float_config(config, "auto_tv_pending_days", 0) or None
         self._auto_tv_pending_episodes = self.__get_float_config(config, "auto_tv_pending_episodes", 0) or None
@@ -273,10 +209,9 @@ class SubscribeAssistant(_PluginBase):
                                                                           0) or None
         self._auto_pause_tv_no_download_days = self.__get_float_config(config, "auto_pause_tv_no_download_days",
                                                                        0) or None
-
-        self._best_version_full = config.get("best_version_full", False)
         self._movie_exclude_type = config.get("movie_exclude_type", [])
         self._tv_exclude_type = config.get("tv_exclude_type", [])
+        
 
         # 停止现有任务
         self.stop_service()
@@ -529,13 +464,6 @@ class SubscribeAssistant(_PluginBase):
                                     'value': 'best_tab'
                                 },
                                 'text': '订阅洗版'
-                            },
-                            {
-                                'component': 'VTab',
-                                'props': {
-                                    'value': 'recognition_guard_tab'
-                                },
-                                'text': '识别增强'
                             }
                         ]
                     },
@@ -691,58 +619,12 @@ class SubscribeAssistant(_PluginBase):
                                                             'label': '下载超时时间',
                                                             'type': 'number',
                                                             "min": "0",
-                                                            'hint': '作为下载进度观察窗口，窗口内进度增长低于阈值时视为超时',
+                                                            'hint': 'N小时内未完成下载任务视为超时',
                                                             'persistent-hint': True
                                                         }
                                                     }
                                                 ]
                                             },
-                                            {
-                                                'component': 'VCol',
-                                                'props': {
-                                                    'cols': 12,
-                                                    'md': 4
-                                                },
-                                                'content': [
-                                                    {
-                                                        'component': 'VTextField',
-                                                        'props': {
-                                                            'model': 'download_timeout_progress_threshold',
-                                                            'label': '下载超时进度阈值',
-                                                            'type': 'number',
-                                                            "min": "0",
-                                                            "max": "100",
-                                                            'hint': '超时窗口内下载进度增长低于N%时才删除',
-                                                            'persistent-hint': True
-                                                        }
-                                                    }
-                                                ]
-                                            },
-                                            {
-                                                'component': 'VCol',
-                                                'props': {
-                                                    'cols': 12,
-                                                    'md': 4
-                                                },
-                                                'content': [
-                                                    {
-                                                        'component': 'VTextField',
-                                                        'props': {
-                                                            'model': 'download_timeout_retry_limit',
-                                                            'label': '下载连续超时重试次数',
-                                                            'type': 'number',
-                                                            "min": "1",
-                                                            'hint': '连续低进度超时N次后保留种子并通知',
-                                                            'persistent-hint': True
-                                                        }
-                                                    }
-                                                ]
-                                            }
-                                        ]
-                                    },
-                                    {
-                                        'component': 'VRow',
-                                        'content': [
                                             {
                                                 'component': 'VCol',
                                                 'props': {
@@ -1115,25 +997,7 @@ class SubscribeAssistant(_PluginBase):
                                                 'component': 'VCol',
                                                 'props': {
                                                     'cols': 12,
-                                                    'md': 3
-                                                },
-                                                'content': [
-                                                    {
-                                                        'component': 'VSwitch',
-                                                        'props': {
-                                                            'model': 'best_version_full',
-                                                            'label': '默认全集洗版',
-                                                            'hint': '默认洗版为全集洗版,避免分集洗版导致的资源不同意',
-                                                            'persistent-hint': True
-                                                        }
-                                                    }
-                                                ]
-                                            },
-                                            {
-                                                'component': 'VCol',
-                                                'props': {
-                                                    'cols': 12,
-                                                    'md': 3
+                                                    'md': 4
                                                 },
                                                 'content': [
                                                     {
@@ -1158,7 +1022,7 @@ class SubscribeAssistant(_PluginBase):
                                                 'component': 'VCol',
                                                 'props': {
                                                     'cols': 12,
-                                                    'md': 3
+                                                    'md': 4
                                                 },
                                                 'content': [
                                                     {
@@ -1182,7 +1046,7 @@ class SubscribeAssistant(_PluginBase):
                                                 'component': 'VCol',
                                                 'props': {
                                                     'cols': 12,
-                                                    'md': 3
+                                                    'md': 4
                                                 },
                                                 'content': [
                                                     {
@@ -1242,8 +1106,7 @@ class SubscribeAssistant(_PluginBase):
                                         ]
                                     }
                                 ]
-                            },
-                            self.__get_recognition_guard_form()
+                            }
                         ]
                     },
                     {
@@ -1289,11 +1152,6 @@ class SubscribeAssistant(_PluginBase):
                     },
                     {
                         'component': 'VRow',
-                        'props': {
-                            'style': {
-                                'margin-top': '0'
-                            }
-                        },
                         'content': [
                             {
                                 'component': 'VCol',
@@ -1377,8 +1235,6 @@ class SubscribeAssistant(_PluginBase):
             "auto_search_when_delete": True,
             "skip_deletion": True,
             "download_timeout": 3,
-            "download_timeout_progress_threshold": 5,
-            "download_timeout_retry_limit": 3,
             "timeout_history_cleanup": 24,
             "delete_exclude_tags": "H&R",
             "auto_pause": True,
@@ -1398,332 +1254,6 @@ class SubscribeAssistant(_PluginBase):
             "auto_best_cron": "0 15 * * *",
             "tracker_response": self.__get_default_tracker_response(),
             "tracker_response_listen": True,
-            "recognition_guard_mode": "off",
-            "recognition_guard_target_mode": "auto",
-            "recognition_guard_notify": "off",
-            "recognition_guard_same_name_protection": True,
-            "recognition_guard_keyword_dialog": False,
-            "recognition_guard_movie_year_mode": "loose",
-            "recognition_guard_tv_year_mode": "season_first",
-            "recognition_guard_no_year_action": "allow",
-            "recognition_guard_tmdb_recheck_mode": "off",
-            "recognition_guard_cache_maxsize": 100000,
-            "recognition_guard_keyword_config": self.__get_default_recognition_guard_keyword_config(),
-        }
-
-    def __get_recognition_guard_form(self) -> dict:
-        """
-        拼装识别增强配置页签，集中管理下载前识别保护相关配置。
-        """
-        return {
-            'component': 'VWindowItem',
-            'props': {
-                'value': 'recognition_guard_tab'
-            },
-            'content': [
-                self.__get_recognition_guard_alert(
-                    'error',
-                    '实验性功能：用于拦截同名真人/动漫、电影/剧集互串等风险资源，可能导致订阅误过滤，建议先用观察模式验证。',
-                ),
-                {
-                    'component': 'VRow',
-                    'content': [
-                        self.__get_recognition_guard_control_col(
-                            self.__get_recognition_guard_select(
-                                'recognition_guard_mode',
-                                '识别增强模式',
-                                [
-                                    {'title': '关闭', 'value': 'off'},
-                                    {'title': '观察记录', 'value': 'observe'},
-                                    {'title': '保守拦截', 'value': 'conservative'},
-                                    {'title': '严格拦截', 'value': 'strict'},
-                                ],
-                                '控制命中风险后的处理方式，观察只记录，拦截会移除候选资源',
-                            ),
-                            md=3,
-                        ),
-                        self.__get_recognition_guard_control_col(
-                            self.__get_recognition_guard_switch(
-                                'recognition_guard_same_name_protection',
-                                '同名类型保护',
-                                '拦截同名电影/剧集或真人/动漫互串资源',
-                            ),
-                            md=3,
-                        ),
-                        self.__get_recognition_guard_control_col(
-                            self.__get_recognition_guard_select(
-                                'recognition_guard_notify',
-                                '识别增强通知',
-                                [
-                                    {'title': '关闭', 'value': 'off'},
-                                    {'title': '汇总', 'value': 'summary'},
-                                    {'title': '明细', 'value': 'detail'},
-                                    {'title': '观察和明细', 'value': 'all'},
-                                ],
-                                '控制命中后的通知方式，汇总按原因统计，明细列出资源',
-                            ),
-                            md=3,
-                        ),
-                        self.__get_recognition_guard_control_col(
-                            self.__get_recognition_guard_switch(
-                                'recognition_guard_keyword_dialog',
-                                '关键字配置',
-                                '点击弹出窗口以修改关键字配置',
-                            ),
-                            md=3,
-                        ),
-                    ]
-                },
-                {
-                    'component': 'VRow',
-                    'content': [
-                        self.__get_recognition_guard_control_col(
-                            self.__get_recognition_guard_select(
-                                'recognition_guard_tmdb_recheck_mode',
-                                'TMDB二次识别',
-                                [
-                                    {'title': '关闭', 'value': 'off'},
-                                    {'title': '仅严格模式', 'value': 'strict'},
-                                    {'title': '保守/严格模式', 'value': 'conservative_strict'},
-                                    {'title': '观察/保守/严格', 'value': 'all'},
-                                ],
-                                '对风险资源重新识别，确认是否为目标媒体',
-                            ),
-                            md=4,
-                        ),
-                        self.__get_recognition_guard_control_col(
-                            self.__get_recognition_guard_text_field(
-                                'recognition_guard_cache_maxsize',
-                                '二次识别缓存上限',
-                                '限制二次识别缓存数量',
-                            ),
-                            md=4,
-                        ),
-                        self.__get_recognition_guard_control_col(
-                            self.__get_recognition_guard_select(
-                                'recognition_guard_target_mode',
-                                '目标形态',
-                                [
-                                    {'title': '自动', 'value': 'auto'},
-                                    {'title': '动画/动漫', 'value': 'animation'},
-                                    {'title': '真人/实拍', 'value': 'live_action'},
-                                ],
-                                '指定订阅目标是真人、动漫或自动判断',
-                            ),
-                            md=4,
-                        ),
-                    ]
-                },
-                {
-                    'component': 'VRow',
-                    'content': [
-                        self.__get_recognition_guard_control_col(
-                            self.__get_recognition_guard_select(
-                                'recognition_guard_movie_year_mode',
-                                '电影年份校验',
-                                [
-                                    {'title': '关闭', 'value': 'off'},
-                                    {'title': '宽松（前后一年）', 'value': 'loose'},
-                                    {'title': '严格一致', 'value': 'strict'},
-                                ],
-                                '校验电影资源年份是否匹配目标',
-                            ),
-                            md=4,
-                        ),
-                        self.__get_recognition_guard_control_col(
-                            self.__get_recognition_guard_select(
-                                'recognition_guard_tv_year_mode',
-                                '剧集年份校验',
-                                [
-                                    {'title': '关闭', 'value': 'off'},
-                                    {'title': '宽松（首播/分季均可）', 'value': 'loose'},
-                                    {'title': '订阅季优先', 'value': 'season_first'},
-                                    {'title': '订阅季严格', 'value': 'season_strict'},
-                                ],
-                                '校验剧集资源年份，兼容首播年和季年份',
-                            ),
-                            md=4,
-                        ),
-                        self.__get_recognition_guard_control_col(
-                            self.__get_recognition_guard_select(
-                                'recognition_guard_no_year_action',
-                                '缺少年份处理',
-                                [
-                                    {'title': '放行', 'value': 'allow'},
-                                    {'title': '观察记录', 'value': 'observe'},
-                                    {'title': '过滤', 'value': 'filter'},
-                                ],
-                                '资源缺少年份时放行、观察或过滤',
-                            ),
-                            md=4,
-                        ),
-                    ]
-                },
-                self.__get_recognition_guard_keyword_dialog(),
-            ]
-        }
-
-    @staticmethod
-    def __get_recognition_guard_alert(alert_type: str, text: str) -> dict:
-        """
-        拼装识别增强顶部提示，集中说明功能生效范围。
-        """
-        return {
-            'component': 'VRow',
-            'props': {
-                'class': 'mt-0'
-            },
-            'content': [
-                {
-                    'component': 'VCol',
-                    'props': {
-                        'cols': 12,
-                    },
-                    'content': [
-                        {
-                            'component': 'VAlert',
-                            'props': {
-                                'type': alert_type,
-                                'variant': 'tonal',
-                                'density': 'compact',
-                                'text': text,
-                            }
-                        }
-                    ]
-                }
-            ]
-        }
-
-    @staticmethod
-    def __get_recognition_guard_control_col(component: dict, md: int = 3) -> dict:
-        """
-        拼装识别增强单个配置项列，调用方按当前行布局控制桌面列宽。
-        """
-        return {
-            'component': 'VCol',
-            'props': {
-                'cols': 12,
-                'md': md
-            },
-            'content': [
-                component
-            ]
-        }
-
-    @staticmethod
-    def __get_recognition_guard_select(model: str, label: str, items: List[dict], hint: str) -> dict:
-        """
-        拼装识别增强下拉配置项，沿用插件其他页签的提示和间距风格。
-        """
-        return {
-            'component': 'VSelect',
-            'props': {
-                'model': model,
-                'label': label,
-                'items': items,
-                'hint': hint,
-                'persistent-hint': True
-            }
-        }
-
-    @staticmethod
-    def __get_recognition_guard_switch(model: str, label: str, hint: str) -> dict:
-        """
-        拼装识别增强开关配置项，用于控制单个二元行为。
-        """
-        return {
-            'component': 'VSwitch',
-            'props': {
-                'model': model,
-                'label': label,
-                'hint': hint,
-                'persistent-hint': True
-            }
-        }
-
-    @staticmethod
-    def __get_recognition_guard_text_field(model: str, label: str, hint: str) -> dict:
-        """
-        拼装识别增强数字输入项，目前用于控制二次识别缓存上限。
-        """
-        return {
-            'component': 'VTextField',
-            'props': {
-                'model': model,
-                'label': label,
-                'type': 'number',
-                'min': '1',
-                'hint': hint,
-                'persistent-hint': True
-            }
-        }
-
-    def __get_recognition_guard_keyword_dialog(self) -> dict:
-        """
-        拼装识别增强关键字配置弹窗，避免 YAML 编辑器常驻配置页造成视觉负担。
-        """
-        return {
-            'component': 'VDialog',
-            'props': {
-                'model': 'recognition_guard_keyword_dialog',
-                'max-width': '65rem',
-                'overlay-class': 'v-dialog--scrollable v-overlay--scroll-blocked',
-                'content-class': 'v-card v-card--density-default v-card--variant-elevated rounded-t',
-            },
-            'content': [
-                {
-                    'component': 'VCard',
-                    'props': {
-                        'title': '设置识别增强关键字'
-                    },
-                    'content': [
-                        {
-                            'component': 'VDialogCloseBtn',
-                            'props': {
-                                'model': 'recognition_guard_keyword_dialog'
-                            }
-                        },
-                        {
-                            'component': 'VCardText',
-                            'content': [
-                                self.__get_recognition_guard_keyword_editor(),
-                                self.__get_recognition_guard_alert(
-                                    'info',
-                                    '每个列表项都会匹配标题、副标题、标签和站点分类，allow优先放行，block 按当前模式处理。',
-                                ),
-                            ]
-                        }
-                    ]
-                }
-            ]
-        }
-
-    @staticmethod
-    def __get_recognition_guard_keyword_editor() -> dict:
-        """
-        拼装识别增强关键字 YAML 编辑器，参考种子分类与 H&R 的配置方式。
-        """
-        return {
-            'component': 'VRow',
-            'content': [
-                {
-                    'component': 'VCol',
-                    'props': {
-                        'cols': 12,
-                    },
-                    'content': [
-                        {
-                            'component': 'VAceEditor',
-                            'props': {
-                                'modelvalue': 'recognition_guard_keyword_config',
-                                'lang': 'yaml',
-                                'theme': 'monokai',
-                                'style': 'height: 24rem',
-                            }
-                        }
-                    ]
-                }
-            ]
         }
 
     def get_page(self) -> List[dict]:
@@ -1790,643 +1320,12 @@ class SubscribeAssistant(_PluginBase):
     @staticmethod
     def __get_float_config(config: dict, key: str, default: float) -> float:
         """
-        获取浮点数配置项
+        获取int配置项
         """
         try:
             return float(config.get(key, default))
         except (ValueError, TypeError):
             return default
-
-    @staticmethod
-    def __get_int_config(config: dict, key: str, default: int) -> int:
-        """
-        获取整数配置项
-        """
-        try:
-            return int(float(config.get(key, default)))
-        except (ValueError, TypeError):
-            return default
-
-    @staticmethod
-    def __get_bool_config(config: dict, key: str, default: bool) -> bool:
-        """
-        获取布尔配置项，兼容表单布尔值和旧配置字符串。
-        """
-        value = config.get(key, default)
-        if isinstance(value, bool):
-            return value
-        if isinstance(value, str):
-            return value.lower() in {"true", "1", "yes", "on", "guard"}
-        return bool(value)
-
-    @staticmethod
-    def __get_default_recognition_guard_keyword_config() -> str:
-        """
-        获取识别增强关键字 YAML 默认配置，供首次安装使用。
-        """
-        return """####### 配置说明 BEGIN #######
-# 每个列表项都是关键字，按候选资源标题、副标题、标签和站点分类匹配。
-# live_action / animation 用于区分真人实拍与动画动漫。
-# movie / tv 用于区分同名电影与剧集。
-# allow 优先级最高，命中后跳过识别增强，block 命中后按当前模式直接处理。
-# 示例：
-# allow:
-#   - '官方合集'
-# block:
-#   - '错误作品关键字'
-####### 配置说明 END #######
-
-live_action:
-  - '电视剧版'
-  - '真人版'
-  - '真人'
-  - '实拍'
-  - '真人剧'
-  - '剧版'
-  - '主演'
-  - '演员'
-  - '国剧'
-  - '古装'
-
-animation:
-  - '动画'
-  - '动漫'
-  - '国漫'
-  - '番剧'
-  - 'Bilibili'
-  - '哔哩哔哩'
-
-movie:
-  - '电影'
-  - '剧场版'
-  - '劇場版'
-  - '\\bMovie\\b'
-
-tv:
-  - '\\bS\\d{1,3}(?:E\\d{1,4})?\\b'
-  - '第\\s*\\d+\\s*[集季]'
-  - '全\\s*\\d+\\s*集'
-  - '电视剧'
-  - '剧集'
-  - '劇集'
-  - '\\bTV\\s*Series\\b'
-  - '\\bSeason\\b'
-
-allow: []
-block: []
-"""
-
-    @staticmethod
-    def __normalize_keyword_patterns(value) -> List[str]:
-        """
-        将 YAML 中的关键字配置标准化为列表，兼容单个字符串和数组两种写法。
-        """
-        if value is None:
-            return []
-        if isinstance(value, str):
-            return [pattern.strip() for pattern in value.splitlines() if pattern.strip()]
-        if isinstance(value, list):
-            return [str(pattern).strip() for pattern in value if str(pattern).strip()]
-        logger.warning(f"识别增强关键字配置格式不支持：{value}")
-        return []
-
-    def __load_recognition_guard_keyword_config(self) -> Dict[str, List[str]]:
-        """
-        使用 safe loader 解析识别增强关键字 YAML 配置，返回识别器可直接使用的分组关键字。
-        """
-        config_str = self._recognition_guard_keyword_config or self.__get_default_recognition_guard_keyword_config()
-        yaml = YAML(typ="safe")
-        try:
-            data = yaml.load(io.StringIO(config_str)) or {}
-        except YAMLError as err:
-            logger.error(f"识别增强关键字 YAML 解析失败：{err}")
-            data = {}
-        except Exception as err:
-            logger.error(f"识别增强关键字配置解析异常：{err}")
-            data = {}
-
-        if not isinstance(data, dict):
-            logger.warning("识别增强关键字配置必须是 YAML 对象，已忽略当前配置")
-            data = {}
-
-        return {
-            "live_action": self.__normalize_keyword_patterns(data.get("live_action")),
-            "animation": self.__normalize_keyword_patterns(data.get("animation")),
-            "movie": self.__normalize_keyword_patterns(data.get("movie")),
-            "tv": self.__normalize_keyword_patterns(data.get("tv")),
-            "allow": self.__normalize_keyword_patterns(data.get("allow")),
-            "block": self.__normalize_keyword_patterns(data.get("block")),
-        }
-
-    @staticmethod
-    def __split_custom_words(value: Optional[str]) -> List[str]:
-        """
-        拆分订阅自定义识别词，供二次识别复用主程序候选识别的同一组订阅规则。
-        """
-        if not value:
-            return []
-        return [word.strip() for word in str(value).splitlines() if word.strip()]
-
-    @staticmethod
-    def __normalize_choice(value: str, choices: set, default: str) -> str:
-        """
-        约束枚举型配置值，避免旧配置或手动编辑配置导致运行时出现非法模式。
-        """
-        return value if value in choices else default
-
-    @staticmethod
-    def __normalize_recognition_guard_notify(value) -> str:
-        """
-        约束识别增强通知模式，非法值按关闭处理。
-        """
-        value = str(value or "off")
-        return value if value in {"off", "summary", "detail", "all"} else "off"
-
-    @staticmethod
-    def __truncate_log_value(value: Any, max_length: int = 160, middle: bool = False) -> str:
-        """
-        截断日志中的长文本，保留足够定位问题的信息同时避免 Debug 日志刷屏。
-        """
-        if value is None:
-            return ""
-        text = str(value)
-        if len(text) <= max_length:
-            return text
-        if middle and max_length > 20:
-            left_length = max_length // 2 - 2
-            right_length = max_length - left_length - 5
-            return f"{text[:left_length]}...{text[-right_length:]}"
-        return f"{text[:max_length - 3]}..."
-
-    def __format_log_title_desc(self, title: Any = None, description: Any = None, max_length: int = 220) -> str:
-        """
-        按“标题｜副标题”格式压缩展示资源名称，过长副标题自动截断。
-        """
-        title_text = self.__truncate_log_value(title, max_length=max_length // 2)
-        desc_text = self.__truncate_log_value(description, max_length=max_length // 2)
-        if title_text and desc_text:
-            return f"{title_text}｜{desc_text}"
-        return title_text or desc_text
-
-    def __summarize_fileitem_for_log(self, fileitem: Any) -> str:
-        """
-        摘要展示文件项，长路径按中间截断保留文件名和前缀位置。
-        """
-        if not fileitem:
-            return ""
-        if isinstance(fileitem, dict):
-            name = fileitem.get("name")
-            file_type = fileitem.get("type")
-            storage = fileitem.get("storage")
-            path = fileitem.get("path")
-        else:
-            name = getattr(fileitem, "name", "")
-            file_type = getattr(fileitem, "type", None)
-            storage = getattr(fileitem, "storage", None)
-            path = getattr(fileitem, "path", "")
-        return (
-            f"name={self.__truncate_log_value(name, 100)}，"
-            f"type={file_type}，"
-            f"storage={storage}，"
-            f"path={self.__truncate_log_value(path, 180, middle=True)}"
-        )
-
-    def __summarize_torrent_info_for_log(self, torrent_info: Optional[TorrentInfo]) -> str:
-        """
-        摘要展示种子信息，避免直接输出完整 TorrentInfo 对象中的链接和长描述。
-        """
-        if not torrent_info:
-            return ""
-        title_desc = self.__format_log_title_desc(
-            title=torrent_info.title,
-            description=torrent_info.description,
-        )
-        return (
-            f"{title_desc}，站点={torrent_info.site_name or torrent_info.site}，"
-            f"分类={torrent_info.category}"
-        )
-
-    def __summarize_context_for_log(self, context: Optional[Context]) -> str:
-        """
-        摘要展示资源上下文，只输出媒体和种子的关键识别信息。
-        """
-        if not context:
-            return ""
-        torrent_summary = self.__summarize_torrent_info_for_log(context.torrent_info)
-        recognition_summary = (
-            f"来源={getattr(context, 'resource_source', 'unknown')}，"
-            f"匹配={getattr(context, 'match_source', 'unknown')}，"
-            f"候选识别={getattr(context, 'candidate_recognized', False)}，"
-            f"媒体为目标={getattr(context, 'media_info_is_target', False)}"
-        )
-        media_info = context.media_info
-        media_summary = ""
-        if media_info:
-            media_summary = (
-                f"媒体={getattr(media_info, 'title_year', None) or getattr(media_info, 'title', None)}，"
-                f"类型={getattr(media_info, 'type', None)}"
-            )
-        return "，".join(item for item in [torrent_summary, recognition_summary, media_summary] if item)
-
-    def __summarize_subscribe_dict_for_log(self, subscribe_dict: Optional[dict]) -> str:
-        """
-        摘要展示订阅事件中的订阅数据，避免输出完整订阅对象。
-        """
-        if not subscribe_dict:
-            return ""
-        return (
-            f"id={subscribe_dict.get('id')}，name={self.__truncate_log_value(subscribe_dict.get('name'), 80)}，"
-            f"year={subscribe_dict.get('year')}，season={subscribe_dict.get('season')}，"
-            f"type={subscribe_dict.get('type')}，best_version={subscribe_dict.get('best_version')}"
-        )
-
-    def __summarize_mediainfo_dict_for_log(self, mediainfo_dict: Optional[dict]) -> str:
-        """
-        摘要展示媒体信息字典，只保留识别结果相关字段。
-        """
-        if not mediainfo_dict:
-            return ""
-        return (
-            f"title={self.__truncate_log_value(mediainfo_dict.get('title') or mediainfo_dict.get('title_year'), 80)}，"
-            f"year={mediainfo_dict.get('year')}，type={mediainfo_dict.get('type')}，"
-            f"tmdbid={mediainfo_dict.get('tmdb_id') or mediainfo_dict.get('tmdbid')}，"
-            f"doubanid={mediainfo_dict.get('douban_id') or mediainfo_dict.get('doubanid')}"
-        )
-
-    def __summarize_resource_download_event_for_log(self, event_data: ResourceDownloadEventData) -> str:
-        """
-        摘要展示资源下载事件，避免输出完整 Context 和事件对象。
-        """
-        if not event_data:
-            return ""
-        return (
-            f"downloader={event_data.downloader}，episodes={list(event_data.episodes or [])}，"
-            f"origin={self.__truncate_log_value(event_data.origin, 120)}，"
-            f"资源={self.__summarize_context_for_log(event_data.context)}"
-        )
-
-    def __summarize_transfer_intercept_event_for_log(self, event_data: TransferInterceptEventData) -> str:
-        """
-        摘要展示整理拦截事件，避免输出完整媒体对象和文件路径对象。
-        """
-        if not event_data:
-            return ""
-        mediainfo = event_data.mediainfo
-        media_title = getattr(mediainfo, "title_year", None) or getattr(mediainfo, "title", None)
-        return (
-            f"媒体={self.__truncate_log_value(media_title, 100)}，"
-            f"tmdbid={getattr(mediainfo, 'tmdb_id', None)}，"
-            f"target={self.__truncate_log_value(event_data.target_path, 180, middle=True)}，"
-            f"cancel={event_data.cancel}"
-        )
-
-    def __summarize_transfer_info_for_log(self, transfer_info: Optional[TransferInfo]) -> str:
-        """
-        摘要展示整理完成信息，重点保留文件名、整理类型和截断后的路径。
-        """
-        if not transfer_info:
-            return ""
-        return (
-            f"文件={self.__summarize_fileitem_for_log(getattr(transfer_info, 'fileitem', None))}，"
-            f"整理类型={getattr(transfer_info, 'transfer_type', None)}"
-        )
-
-    def __get_recognition_guard_config(self, subscribe: Optional[Subscribe] = None) -> RecognitionGuardConfig:
-        """
-        构建识别增强配置对象，供资源选择和下载兜底链路按订阅上下文复用。
-        """
-        mode = self.__normalize_choice(
-            self._recognition_guard_mode,
-            {"off", "observe", "conservative", "strict"},
-            "off",
-        )
-        keyword_patterns = self.__load_recognition_guard_keyword_config()
-        return RecognitionGuardConfig(
-            mode=mode,
-            target_mode=self.__normalize_choice(
-                self._recognition_guard_target_mode,
-                {"auto", "animation", "live_action"},
-                "auto",
-            ),
-            same_name_protection=bool(self._recognition_guard_same_name_protection),
-            movie_year_mode=self.__normalize_choice(
-                self._recognition_guard_movie_year_mode,
-                {"off", "loose", "strict"},
-                "loose",
-            ),
-            tv_year_mode=self.__normalize_choice(
-                self._recognition_guard_tv_year_mode,
-                {"off", "loose", "season_first", "season_strict"},
-                "season_first",
-            ),
-            no_year_action=self.__normalize_choice(
-                self._recognition_guard_no_year_action,
-                {"allow", "observe", "filter"},
-                "allow",
-            ),
-            tmdb_recheck_mode=self.__normalize_choice(
-                self._recognition_guard_tmdb_recheck_mode,
-                {"off", "strict", "conservative_strict", "all"},
-                "off",
-            ),
-            cache_maxsize=max(1, int(self._recognition_guard_cache_maxsize or 100000)),
-            custom_words=self.__split_custom_words(subscribe.custom_words if subscribe else None),
-            live_action_patterns=keyword_patterns["live_action"],
-            animation_patterns=keyword_patterns["animation"],
-            movie_patterns=keyword_patterns["movie"],
-            tv_patterns=keyword_patterns["tv"],
-            allow_patterns=keyword_patterns["allow"],
-            block_patterns=keyword_patterns["block"],
-        )
-
-    def __build_recognition_guard(self, subscribe: Optional[Subscribe] = None) -> RecognitionGuard:
-        """
-        创建识别增强器实例，并注入订阅自定义识别词与主程序识别函数。
-        """
-        return RecognitionGuard(
-            config=self.__get_recognition_guard_config(subscribe=subscribe),
-            recognizer=self.__recognize_guard_candidate,
-        )
-
-    def __recognize_guard_candidate(self, meta, mtype: Optional[MediaType] = None) -> Optional[MediaInfo]:
-        """
-        使用主程序识别链路识别候选资源，识别增强只通过该入口触发二次识别。
-        """
-        try:
-            return self.chain.recognize_media(meta=meta, mtype=mtype, cache=True)
-        except Exception as err:
-            logger.warning(f"订阅识别增强二次识别异常：{getattr(meta, 'title', '')}，错误：{err}")
-            return None
-
-    def __handle_recognition_guard_decision(self, subscribe: Subscribe, decision: RecognitionGuardDecision,
-                                            context: Context):
-        """
-        记录识别增强命中结果；通知由选择阶段统一聚合，避免同一次搜索刷屏。
-        """
-        if not decision or not decision.observed:
-            return
-
-        action = "拦截" if decision.blocked else "观察"
-        message = (f"{self.__format_subscribe(subscribe=subscribe)} 识别增强{action}资源："
-                   f"{self.__format_recognition_guard_candidate(decision=decision, context=context)}，"
-                   f"原因：{decision.reason}")
-        if decision.blocked:
-            logger.warning(message)
-        else:
-            logger.info(message)
-
-    def __format_recognition_guard_candidate(
-            self,
-            decision: RecognitionGuardDecision,
-            context: Optional[Context]
-    ) -> str:
-        """
-        格式化识别增强命中的候选资源，日志中按“标题｜副标题”压缩展示。
-        """
-        title = decision.candidate_title if decision else ""
-        torrent_info = context.torrent_info if context else None
-        description = torrent_info.description if torrent_info else None
-        return self.__format_log_title_desc(title=title, description=description)
-
-    @staticmethod
-    def __format_recognition_guard_action(decision: RecognitionGuardDecision) -> str:
-        """
-        将识别增强判定结果转换为通知和日志中的处理动作。
-        """
-        return "拦截" if decision.blocked else "观察"
-
-    def __get_recognition_guard_notify_key(self, subscribe: Subscribe, decision: RecognitionGuardDecision) -> str:
-        """
-        生成识别增强通知限频键，同一订阅同一原因在限频窗口内只通知一次。
-        """
-        subscribe_id = getattr(subscribe, "id", None) or self.__format_subscribe(subscribe=subscribe)
-        action = "block" if decision.blocked else "observe"
-        return f"{subscribe_id}|{action}|{decision.code}|{decision.reason}"
-
-    def __filter_recognition_guard_notify_pairs(
-            self,
-            subscribe: Subscribe,
-            decision_contexts: List[Tuple[RecognitionGuardDecision, Context]]
-    ) -> List[Tuple[RecognitionGuardDecision, Context]]:
-        """
-        对识别增强通知做同订阅同原因限频，并保留同一次搜索内同原因的完整聚合数据。
-        """
-        notify_cache = self._recognition_guard_notify_cache
-        if notify_cache is None:
-            notify_cache = {}
-            self._recognition_guard_notify_cache = notify_cache
-
-        now = datetime.now()
-        interval = max(0, int(self._recognition_guard_notify_interval or 0))
-        grouped_pairs = {}
-        for decision, context in decision_contexts:
-            key = self.__get_recognition_guard_notify_key(subscribe=subscribe, decision=decision)
-            grouped_pairs.setdefault(key, []).append((decision, context))
-
-        included_pairs = []
-        updated_keys = []
-        for key, pairs in grouped_pairs.items():
-            last_time = notify_cache.get(key)
-            if interval and last_time and (now - last_time).total_seconds() < interval:
-                continue
-            included_pairs.extend(pairs)
-            updated_keys.append(key)
-
-        for key in updated_keys:
-            notify_cache[key] = now
-
-        if interval:
-            cleanup_seconds = interval * 2
-            for key, last_time in list(notify_cache.items()):
-                if (now - last_time).total_seconds() > cleanup_seconds:
-                    notify_cache.pop(key, None)
-
-        return included_pairs
-
-    def __format_recognition_guard_summary(
-            self,
-            decision_contexts: List[Tuple[RecognitionGuardDecision, Context]]
-    ) -> str:
-        """
-        生成识别增强汇总通知内容，仅按处理动作和原因计数。
-        """
-        grouped = {}
-        for decision, _ in decision_contexts:
-            action = self.__format_recognition_guard_action(decision=decision)
-            key = (action, decision.reason)
-            grouped[key] = grouped.get(key, 0) + 1
-
-        lines = [
-            "处理：汇总",
-            f"命中：{len(decision_contexts)} 条",
-        ]
-        for (action, reason), count in list(grouped.items())[:8]:
-            lines.append(f"- {action} {count} 条：{reason}")
-        if len(grouped) > 8:
-            lines.append(f"其余原因：{len(grouped) - 8} 类")
-        return "\n".join(lines)
-
-    def __format_recognition_guard_detail(
-            self,
-            decision_contexts: List[Tuple[RecognitionGuardDecision, Context]],
-            include_observe: bool
-    ) -> str:
-        """
-        生成识别增强明细通知内容，相同原因合并展示并限制样例条数。
-        """
-        grouped = {}
-        for decision, context in decision_contexts:
-            action = self.__format_recognition_guard_action(decision=decision)
-            key = (action, decision.reason)
-            grouped.setdefault(key, []).append((decision, context))
-
-        title = "观察和明细" if include_observe else "明细"
-        lines = [
-            f"处理：{title}",
-            f"命中：{len(decision_contexts)} 条",
-        ]
-        detail_limit = 10
-        detail_count = 0
-        for (action, reason), pairs in grouped.items():
-            lines.append(f"- {action} {len(pairs)} 条：{reason}")
-            for decision, context in pairs:
-                if detail_count >= detail_limit:
-                    continue
-                candidate = self.__format_recognition_guard_candidate(decision=decision, context=context)
-                lines.append(f"  {candidate}")
-                detail_count += 1
-        if len(decision_contexts) > detail_count:
-            lines.append(f"其余明细：{len(decision_contexts) - detail_count} 条")
-        return "\n".join(lines)
-
-    def __post_recognition_guard_decisions(
-            self,
-            subscribe: Subscribe,
-            decision_contexts: List[Tuple[RecognitionGuardDecision, Context]]
-    ):
-        """
-        按配置聚合发送识别增强通知；默认关闭通知，观察命中仅在“观察和明细”模式下推送。
-        """
-        if not self._notify:
-            return
-
-        notify_mode = self.__normalize_recognition_guard_notify(self._recognition_guard_notify)
-        if notify_mode == "off":
-            return
-
-        if notify_mode == "all":
-            notify_pairs = [(decision, context) for decision, context in decision_contexts if decision.observed]
-        else:
-            notify_pairs = [(decision, context) for decision, context in decision_contexts if decision.blocked]
-        if not notify_pairs:
-            return
-
-        notify_pairs = self.__filter_recognition_guard_notify_pairs(
-            subscribe=subscribe,
-            decision_contexts=notify_pairs,
-        )
-        if not notify_pairs:
-            return
-
-        subscribe_desc = self.__format_subscribe_desc(subscribe=subscribe)
-        if not subscribe_desc:
-            subscribe_desc = self.__format_subscribe(subscribe=subscribe)
-        if notify_mode == "summary":
-            title = f"{subscribe_desc} 识别增强汇总"
-            text = self.__format_recognition_guard_summary(decision_contexts=notify_pairs)
-        elif notify_mode == "detail":
-            title = f"{subscribe_desc} 识别增强明细"
-            text = self.__format_recognition_guard_detail(decision_contexts=notify_pairs, include_observe=False)
-        else:
-            title = f"{subscribe_desc} 识别增强观察和明细"
-            text = self.__format_recognition_guard_detail(decision_contexts=notify_pairs, include_observe=True)
-
-        self.post_message(
-            mtype=NotificationType.Subscribe,
-            title=title,
-            text=text,
-            image=self.__get_subscribe_image(subscribe),
-        )
-
-    def __apply_recognition_guard_selection(self, event_data: ResourceSelectionEventData,
-                                            subscribe: Subscribe) -> bool:
-        """
-        在资源选择阶段过滤自动订阅候选资源，返回是否修改了候选列表。
-        """
-        guard = self.__build_recognition_guard(subscribe=subscribe)
-        if guard.config.mode == "off":
-            return False
-
-        if event_data.updated and event_data.updated_contexts is not None:
-            update_contexts = list(event_data.updated_contexts)
-        else:
-            update_contexts = list(event_data.contexts or [])
-
-        logger.debug(
-            f"{self.__format_subscribe(subscribe=subscribe)} 识别增强开始过滤候选资源，"
-            f"模式：{guard.config.mode}，候选数：{len(update_contexts)}"
-        )
-        retained_contexts = []
-        observed_decisions = []
-        for context in update_contexts:
-            decision = guard.evaluate(context)
-            if decision.observed:
-                observed_decisions.append((decision, context))
-                self.__handle_recognition_guard_decision(
-                    subscribe=subscribe,
-                    decision=decision,
-                    context=context,
-                )
-            if not decision.blocked:
-                retained_contexts.append(context)
-        self.__post_recognition_guard_decisions(
-            subscribe=subscribe,
-            decision_contexts=observed_decisions,
-        )
-        if len(retained_contexts) == len(update_contexts):
-            logger.debug(
-                f"{self.__format_subscribe(subscribe=subscribe)} 识别增强未移除候选资源，"
-                f"候选数：{len(update_contexts)}"
-            )
-            return False
-
-        logger.info(
-            f"{self.__format_subscribe(subscribe=subscribe)} 识别增强已过滤候选资源，"
-            f"原始数：{len(update_contexts)}，保留数：{len(retained_contexts)}"
-        )
-        event_data.updated = True
-        event_data.updated_contexts = retained_contexts
-        event_data.source = self.plugin_name
-        return True
-
-    def __apply_recognition_guard_download(self, event_data: ResourceDownloadEventData,
-                                           subscribe: Subscribe) -> bool:
-        """
-        在资源下载阶段做识别增强兜底校验，供后续评估是否启用。
-        """
-        guard = self.__build_recognition_guard(subscribe=subscribe)
-        if guard.config.mode == "off":
-            return False
-
-        decision = guard.evaluate(event_data.context)
-        if not decision.observed:
-            return False
-        self.__handle_recognition_guard_decision(
-            subscribe=subscribe,
-            decision=decision,
-            context=event_data.context,
-        )
-        self.__post_recognition_guard_decisions(
-            subscribe=subscribe,
-            decision_contexts=[(decision, event_data.context)],
-        )
-        if not decision.blocked:
-            return False
-
-        event_data.cancel = True
-        event_data.source = self.plugin_name
-        event_data.reason = decision.reason
-        return True
 
     def __update_config(self):
         """
@@ -2451,18 +1350,6 @@ block: []
             "auto_best_clear_history_type": self._auto_best_clear_history_type,
             "skip_deletion": self._skip_deletion,
             "download_timeout": self._download_timeout,
-            "download_timeout_progress_threshold": self._download_timeout_progress_threshold,
-            "download_timeout_retry_limit": self._download_timeout_retry_limit,
-            "recognition_guard_mode": self._recognition_guard_mode,
-            "recognition_guard_target_mode": self._recognition_guard_target_mode,
-            "recognition_guard_notify": self._recognition_guard_notify,
-            "recognition_guard_same_name_protection": self._recognition_guard_same_name_protection,
-            "recognition_guard_movie_year_mode": self._recognition_guard_movie_year_mode,
-            "recognition_guard_tv_year_mode": self._recognition_guard_tv_year_mode,
-            "recognition_guard_no_year_action": self._recognition_guard_no_year_action,
-            "recognition_guard_tmdb_recheck_mode": self._recognition_guard_tmdb_recheck_mode,
-            "recognition_guard_cache_maxsize": self._recognition_guard_cache_maxsize,
-            "recognition_guard_keyword_config": self._recognition_guard_keyword_config,
             "timeout_history_cleanup": self._timeout_history_cleanup,
             "auto_tv_pending_days": self._auto_tv_pending_days,
             "auto_tv_pending_episodes": self._auto_tv_pending_episodes,
@@ -2478,8 +1365,7 @@ block: []
             "auto_pause_movie_no_download_days": self._auto_pause_movie_no_download_days,
             "auto_pause_tv_no_download_days": self._auto_pause_tv_no_download_days,
             "movie_exclude_type": self._movie_exclude_type,
-            "tv_exclude_type": self._tv_exclude_type,
-            "best_version_full": self._best_version_full,
+            "tv_exclude_type": self._tv_exclude_type
         }
         self.update_config(config=config)
 
@@ -2512,8 +1398,12 @@ block: []
         """
         下载检查
         """
-        if not (self._auto_download_delete or self._manual_delete_listen or
-                self._tracker_response_listen or self._auto_download_pending):
+        try:
+            if not (self._auto_download_delete or self._manual_delete_listen or
+                    self._tracker_response_listen or self._auto_download_pending):
+                return
+        except Exception as e:
+            logger.error(f"下载检查执行失败，错误信息：{str(e)}")
             return
 
         logger.info("开始清理超时种子记录...")
@@ -2616,10 +1506,7 @@ block: []
 
             subscribe_id = event.event_data.get("subscribe_id")
             subscribe_dict = event.event_data.get("subscribe_info")
-            logger.debug(
-                f"接收到订阅删除事件，订阅 ID: {subscribe_id}，"
-                f"订阅：{self.__summarize_subscribe_dict_for_log(subscribe_dict)}"
-            )
+            logger.debug(f"接收到订阅删除事件，订阅 ID: {subscribe_id}，数据：{subscribe_dict}")
             self.clear_tasks(subscribe_id=subscribe_id, subscribe=subscribe_dict)
         except Exception as e:
             logger.error(f"处理订阅删除事件时发生错误: {str(e)}")
@@ -2643,17 +1530,11 @@ block: []
             username = event.event_data.get("username")
             mediainfo_dict = event.event_data.get("mediainfo")
 
-            logger.debug(
-                f"接收到订阅添加事件，来自用户: {username}，订阅 ID: {subscribe_id}，"
-                f"媒体：{self.__summarize_mediainfo_dict_for_log(mediainfo_dict)}"
-            )
+            logger.debug(f"接收到订阅添加事件，来自用户: {username}, 订阅 ID: {subscribe_id}, 数据: {mediainfo_dict}")
 
             # 缺少订阅信息或媒体信息
             if not subscribe_id or not mediainfo_dict:
-                logger.warning(
-                    f"订阅事件数据缺失，跳过处理。订阅 ID: {subscribe_id}，"
-                    f"媒体：{self.__summarize_mediainfo_dict_for_log(mediainfo_dict)}"
-                )
+                logger.warning(f"订阅事件数据缺失，跳过处理。订阅 ID: {subscribe_id}, 媒体信息: {mediainfo_dict}")
                 return
 
             # 获取订阅信息和媒体信息
@@ -2728,10 +1609,7 @@ block: []
             subscribe_dict = event.event_data.get("subscribe_info")
             mediainfo_dict = event.event_data.get("mediainfo")
 
-            logger.debug(
-                f"接收到订阅完成事件，订阅：{self.__summarize_subscribe_dict_for_log(subscribe_dict)}，"
-                f"媒体：{self.__summarize_mediainfo_dict_for_log(mediainfo_dict)}"
-            )
+            logger.debug(f"接收到订阅完成事件，订阅数据：{subscribe_dict}，媒体数据：{mediainfo_dict}")
 
             # 订阅完成清理订阅任务数据
             self.clear_tasks(subscribe_id=subscribe_id, subscribe=subscribe_dict)
@@ -2742,11 +1620,7 @@ block: []
 
             # 缺少订阅信息或媒体信息
             if not subscribe_dict or not mediainfo_dict:
-                logger.warning(
-                    f"订阅事件数据缺失，跳过处理。"
-                    f"订阅：{self.__summarize_subscribe_dict_for_log(subscribe_dict)}，"
-                    f"媒体：{self.__summarize_mediainfo_dict_for_log(mediainfo_dict)}"
-                )
+                logger.warning(f"订阅事件数据缺失，跳过处理。订阅数据: {subscribe_dict}, 媒体信息: {mediainfo_dict}")
                 return
 
             # 获取订阅信息和媒体信息
@@ -2781,11 +1655,7 @@ block: []
             username = event.event_data.get("username")
             source = event.event_data.get("source")
 
-            logger.debug(
-                f"接收到下载添加事件，来自用户: {username}，hash={torrent_hash}，"
-                f"downloader={downloader}，episodes={episodes}，"
-                f"资源={self.__summarize_context_for_log(context)}"
-            )
+            logger.debug(f"接收到下载添加事件，来自用户: {username}, 数据: {event.event_data}")
 
             subscribe_info, subscribe = self.__get_subscribe_by_source(source=source)
             if not subscribe_info or not subscribe:
@@ -2805,9 +1675,6 @@ block: []
             if not torrent:
                 logger.info(f"没有在下载器中获取到 {torrent_hash} 种子信息，跳过处理")
                 return
-            torrent_info = self.__get_torrent_info(torrent=torrent, dl_type=service.type) or {}
-            progress_percent = self.__get_torrent_progress_percent(torrent_info=torrent_info)
-            current_time = time.time()
 
             # 更新订阅下载任务
             self.__with_lock_and_update_subscribe_tasks(method=self.__update_subscribe_torrent_task,
@@ -2835,9 +1702,7 @@ block: []
                         "pending_check": self._auto_download_pending,
                         "timeout_check": self._auto_download_delete,
                         "manual_check": self._manual_delete_listen,
-                        "time": current_time,
-                        "last_progress_percent": progress_percent,
-                        "last_progress_check_time": current_time,
+                        "time": time.time(),
                     }
                 })
             )
@@ -2879,9 +1744,6 @@ block: []
                     event_data.source = self.plugin_name
                     return
 
-        # 自动订阅候选进入下载链路前先过滤同名真人/动画或电影/剧集互串资源。
-        self.__apply_recognition_guard_selection(event_data=event_data, subscribe=subscribe)
-
         # 跳过删除记录未开启
         if not self._skip_deletion:
             logger.debug("跳过删除记录功能未开启，跳过处理")
@@ -2893,10 +1755,7 @@ block: []
 
         # 处理超时删除任务
         updated = False
-        if event_data.updated and event_data.updated_contexts is not None:
-            update_contexts = event_data.updated_contexts
-        else:
-            update_contexts = event_data.contexts or []
+        update_contexts = event_data.updated_contexts or event_data.contexts or []
         for context in list(update_contexts):
             torrent_info = context.torrent_info
             if not torrent_info:
@@ -2904,10 +1763,7 @@ block: []
             for torrent_task in delete_tasks.values():
                 if self.__compare_torrent_info_and_task(torrent_info=torrent_info, torrent_task=torrent_task,
                                                         partial_match=True):
-                    logger.info(
-                        f"存在超时/手动删除的种子信息，跳过，"
-                        f"资源：{self.__summarize_context_for_log(context)}"
-                    )
+                    logger.info(f"存在超时/手动删除的种子信息，跳过，context：{context}")
                     update_contexts.remove(context)
                     updated = True
                     continue
@@ -2924,8 +1780,9 @@ block: []
         if not event or not event.event_data:
             return
 
+        logger.debug(f"接收到资源下载事件，资源信息: {event.event_data}")
+
         event_data: ResourceDownloadEventData = event.event_data
-        logger.debug(f"接收到资源下载事件，{self.__summarize_resource_download_event_for_log(event_data)}")
         if event_data.cancel:
             logger.debug(f"该事件已被其他事件处理器处理，跳过后续操作")
             return
@@ -2944,14 +1801,10 @@ block: []
             logger.debug(f"未能找到订阅信息，跳过处理")
             return
 
-        # 下载阶段兜底接入暂不启用；当前识别增强只在 ResourceSelection 阶段过滤自动订阅候选。
-        # if self.__apply_recognition_guard_download(event_data=event_data, subscribe=subscribe):
-        #     return
-
         self.__handle_resource_download_pending(subscribe=subscribe, context=context,
                                                 episodes=episodes, downloader=downloader)
 
-        self.__handle_resource_download_history_clear(subscribe=subscribe, context=context)
+        self.__handle_resource_download_history_clear(subscribe=subscribe)
 
     @eventmanager.register(etype=ChainEventType.TransferIntercept, priority=9999)
     def handle_transfer_intercept_event(self, event: Event):
@@ -2961,8 +1814,9 @@ block: []
         if not event or not event.event_data:
             return
 
+        logger.debug(f"接收到整理拦截事件，事件信息: {event.event_data}")
+
         event_data: TransferInterceptEventData = event.event_data
-        logger.debug(f"接收到整理拦截事件，{self.__summarize_transfer_intercept_event_for_log(event_data)}")
         if event_data.cancel:
             logger.debug(f"该事件已被其他事件处理器处理，跳过后续操作")
             return
@@ -2991,9 +1845,8 @@ block: []
             return
 
         logger.debug(
-            f"接收到整理完成事件，{self.__summarize_transfer_info_for_log(transfer_info)}，"
-            f"下载器={downloader}，种子={download_hash}"
-        )
+            f"接收到整理完成事件，整理文件信息: {transfer_info.fileitem}，整理类型：{transfer_info.transfer_type}，"
+            f"下载器：{downloader}，种子：{download_hash}")
 
         self.__handle_transfer_complete_remove_torrent(transfer_info, downloader, download_hash)
 
@@ -3023,7 +1876,7 @@ block: []
 
         logger.debug(f"已完成资源下载自动待定处理")
 
-    def __handle_resource_download_history_clear(self, subscribe: Subscribe, context: Optional[Context] = None):
+    def __handle_resource_download_history_clear(self, subscribe: Subscribe):
         """
         处理洗版资源下载时清理整理记录
         """
@@ -3031,23 +1884,10 @@ block: []
             return
 
         # 如果订阅类型不在清理整理记录的策略中，则直接返回
-        subscribe_type = self.__resolve_subscribe_media_type(subscribe=subscribe)
-        if subscribe_type == MediaType.UNKNOWN:
-            logger.warning(f"{self.__format_subscribe(subscribe)} 媒体类型无效，跳过清理整理记录处理")
-            return
+        subscribe_type = MediaType(subscribe.type)
         if subscribe_type not in self._auto_best_clear_history_types:
             logger.debug(f"{self.__format_subscribe(subscribe)}，尚未开启清理整理记录，跳过处理")
             return
-
-        if subscribe_type == MediaType.TV and context and context.torrent_info:
-            if not self.__is_episode_range_covered(
-                    title=context.torrent_info.title,
-                    subtitle=context.torrent_info.description,
-                    subscribe=subscribe):
-                logger.info(
-                    f"{self.__format_subscribe(subscribe)} 当前洗版资源未覆盖订阅剧集范围，跳过清理整理记录"
-                )
-                return
 
         if not subscribe.tmdbid:
             logger.warning(f"{self.__format_subscribe(subscribe)} 未能获取到 TMDBID，跳过处理")
@@ -3295,22 +2135,6 @@ block: []
             logger.error(f"获取种子标签失败，错误: {e}")
             return []
 
-    def __get_delete_excluded_tags(self, torrent: Any, dl_type: str) -> set[str]:
-        """
-        获取当前种子命中的删除排除标签
-        :param torrent: 下载器种子对象
-        :param dl_type: 下载器类型
-        """
-        if not self._delete_exclude_tags:
-            return set()
-
-        torrent_tags = self.__get_torrent_tags(torrent=torrent, dl_type=dl_type)
-        if not torrent_tags:
-            return set()
-
-        exclude_tags = set(tag.strip() for tag in self._delete_exclude_tags.split(",") if tag.strip())
-        return exclude_tags & set(torrent_tags)
-
     @staticmethod
     def __get_torrent_info(torrent: Any, dl_type: str) -> dict:
         """
@@ -3514,32 +2338,10 @@ block: []
             return True, 0
 
         # 如果种子的已下载大小大于目标大小，说明已完成
-        if torrent_info.get("downloaded") >= torrent_info.get("target_size"):
+        if torrent_info.get("downloaded") >= torrent_info.get("target_size") * 0.8:
             return True, 0
 
         return False, torrent_info.get("dltime")
-
-    @staticmethod
-    def __get_torrent_progress_percent(torrent_info: dict) -> float:
-        """
-        计算种子当前下载进度百分比
-        :param torrent_info: 下载器返回的种子信息
-        :return: 0-100之间的下载进度百分比
-        """
-        if not torrent_info:
-            return 0
-
-        try:
-            downloaded = float(torrent_info.get("downloaded") or 0)
-            target_size = float(torrent_info.get("target_size") or torrent_info.get("total_size") or 0)
-        except (TypeError, ValueError):
-            return 0
-
-        if target_size <= 0:
-            return 0
-
-        progress_percent = downloaded / target_size * 100
-        return max(0, min(progress_percent, 100))
 
     def __get_subscribe_by_source(self, source: str) -> Tuple[Optional[dict], Optional[Subscribe]]:
         """
@@ -3557,7 +2359,7 @@ block: []
         try:
             subscribe_dict = json.loads(json_data)
         except Exception as e:
-            logger.error(f"解析 source 数据失败，source: {self.__truncate_log_value(json_data, 180)}，错误: {e}")
+            logger.error(f"解析 source 数据失败，source: {json_data}, 错误: {e}")
             return None, None
 
         subscribe_id = subscribe_dict.get("id")
@@ -3701,8 +2503,7 @@ block: []
                                                       subscribe_torrent_tasks=subscribe_torrent_tasks,
                                                       triggered_subscribe_ids=triggered_subscribe_ids,
                                                       torrent_hash=torrent_hash, torrent_task=torrent_task,
-                                                      torrent_tasks=torrent_tasks, reason="订阅种子手动删除",
-                                                      reason_type="manual")
+                                                      torrent_tasks=torrent_tasks, reason="订阅种子手动删除")
                     continue
 
             torrent_info = self.__get_torrent_info(torrent=torrent, dl_type=service.type)
@@ -3714,9 +2515,6 @@ block: []
             is_completed, download_time = self.__get_torrent_completion_status(torrent_info=torrent_info)
             if is_completed:
                 logger.info(f"种子 {torrent_desc} 已完成，将从订阅种子任务中移除")
-                self.__clear_download_timeout_state(subscribe_task=subscribe_task,
-                                                    subscribe=subscribe,
-                                                    torrent_task=torrent_task)
 
                 if torrent_hash in torrent_tasks:
                     del torrent_tasks[torrent_hash]
@@ -3728,8 +2526,6 @@ block: []
                 logger.debug(f"种子任务 {torrent_desc} 尚未完成，下载时长 {download_time / 3600 :.2f}")
 
                 deletion_reason = None
-                deletion_type = "timeout"
-                delete_excluded_tags = self.__get_delete_excluded_tags(torrent=torrent, dl_type=service.type)
 
                 # 1. 判断 Tracker 响应关键字是否满足删除条件
                 if self._tracker_response_listen and self._tracker_responses:
@@ -3746,41 +2542,28 @@ block: []
                                 break
                         if matched_keyword:
                             deletion_reason = f"订阅种子，命中 Tracker 响应关键字（{matched_keyword}）"
-                            deletion_type = "tracker"
 
-                if deletion_reason and delete_excluded_tags:
-                    logger.debug(f"种子任务 {torrent_desc} 满足删除条件（{deletion_reason}），"
-                                 f"但满足不删除标签 {delete_excluded_tags}，跳过处理")
-                    continue
-
-                if not deletion_reason and delete_excluded_tags:
-                    logger.debug(f"种子任务 {torrent_desc} 满足不删除标签 {delete_excluded_tags}，跳过超时删除检查")
-                    continue
-
-                # 2. 判断智能超时删除条件（只有当 Tracker 未触发时才检查超时）
+                # 2. 判断超时删除条件（只有当 Tracker 未触发时才检查超时）
                 if not deletion_reason:
-                    timeout_action, timeout_reason = self.__check_download_timeout_action(
-                        subscribe=subscribe,
-                        subscribe_task=subscribe_task,
-                        torrent_task=torrent_task,
-                        torrent_info=torrent_info,
-                        download_time=download_time,
-                    )
-                    if timeout_action == "manual_review":
-                        self.__handle_download_timeout_manual_review(subscribe=subscribe,
-                                                                     torrent_task=torrent_task,
-                                                                     reason=timeout_reason)
-                        continue
-                    if timeout_action == "ignore":
-                        continue
-                    if timeout_action == "delete":
-                        deletion_reason = timeout_reason
-                        deletion_type = "timeout"
+                    if timeout_check and self._auto_download_delete and download_time >= self._download_timeout * 3600:
+                        deletion_reason = f"订阅种子，下载时长超时（{download_time / 3600 :.2f}）"
 
                 if not deletion_reason:
                     continue
 
-                # 3. 如果满足删除条件，则统一调用删除接口并清理订阅任务记录
+                # 3. 如果满足删除条件，则统一调用删除接口，检查是否存在排除删除的标签
+                if self._delete_exclude_tags:
+                    torrent_tags = self.__get_torrent_tags(torrent=torrent, dl_type=service.type)
+                    if torrent_tags:
+                        # 对配置的排除标签进行 trim 并转换为集合
+                        exclude_tags = set(
+                            tag.strip() for tag in self._delete_exclude_tags.split(",") if tag.strip())
+                        intersection_tags = exclude_tags & set(torrent_tags)
+                        if intersection_tags:
+                            logger.debug(f"种子任务 {torrent_desc} 满足删除条件（{deletion_reason}），"
+                                         f"但满足不删除标签 {intersection_tags}，跳过处理")
+                            continue
+
                 logger.info(f"种子任务 {torrent_desc} 满足删除条件：{deletion_reason}，即将删除并从订阅种子任务中移除")
                 self.__delete_torrents(downloader=service.instance, torrent_hashes=torrent_hash)
                 self.__clean_torrent_task_by_hash(
@@ -3791,229 +2574,15 @@ block: []
                     torrent_hash=torrent_hash,
                     torrent_task=torrent_task,
                     torrent_tasks=torrent_tasks,
-                    reason=deletion_reason,
-                    reason_type=deletion_type
+                    reason=deletion_reason
                 )
 
         self.__clean_invalid_torrents(invalid_torrent_hashes, subscribe_tasks, torrent_tasks)
 
-    def __check_download_timeout_action(self, subscribe: Subscribe, subscribe_task: dict, torrent_task: dict,
-                                        torrent_info: dict, download_time: float) -> Tuple[str, Optional[str]]:
-        """
-        判断未完成订阅种子是否满足智能超时处理条件
-        :param subscribe: 当前订阅对象
-        :param subscribe_task: 当前订阅任务记录
-        :param torrent_task: 当前种子任务记录
-        :param torrent_info: 下载器返回的种子详情
-        :param download_time: 下载器统计的下载耗时
-        :return: 处理动作与原因，动作包括 wait/delete/ignore/manual_review
-        """
-        if not (torrent_task.get("timeout_check") and self._auto_download_delete):
-            return "wait", None
-
-        current_time = time.time()
-        scope_key = self.__get_timeout_scope_key(subscribe=subscribe, torrent_task=torrent_task)
-        timeout_state = self.__get_download_timeout_state(subscribe_task=subscribe_task, scope_key=scope_key)
-        torrent_hash = torrent_task.get("hash")
-        try:
-            ignore_until = float(timeout_state.get("ignore_until") or 0)
-        except (TypeError, ValueError):
-            ignore_until = 0
-        if timeout_state.get("last_torrent_hash") == torrent_hash and ignore_until > current_time:
-            logger.debug(f"种子 {self.__get_torrent_desc(torrent_hash=torrent_hash, torrent_task=torrent_task)} "
-                         f"处于连续超时保护期，跳过超时删除检查")
-            return "ignore", None
-
-        progress_percent = self.__get_torrent_progress_percent(torrent_info=torrent_info)
-        baseline_time = torrent_task.get("last_progress_check_time")
-        baseline_progress = torrent_task.get("last_progress_percent")
-        if baseline_time is None or baseline_progress is None:
-            self.__refresh_download_progress_baseline(torrent_task=torrent_task,
-                                                      progress_percent=progress_percent,
-                                                      current_time=current_time)
-            logger.debug(f"种子 {self.__get_torrent_desc(torrent_hash=torrent_hash, torrent_task=torrent_task)} "
-                         f"初始化下载进度基线：{progress_percent:.2f}%")
-            return "wait", None
-
-        try:
-            baseline_time = float(baseline_time)
-            baseline_progress = float(baseline_progress)
-        except (TypeError, ValueError):
-            self.__refresh_download_progress_baseline(torrent_task=torrent_task,
-                                                      progress_percent=progress_percent,
-                                                      current_time=current_time)
-            return "wait", None
-
-        timeout_seconds = max(float(self._download_timeout or 0), 0) * 3600
-        if current_time - baseline_time < timeout_seconds:
-            return "wait", None
-
-        progress_delta = max(0, progress_percent - baseline_progress)
-        progress_threshold = self.__get_download_timeout_progress_threshold()
-        if progress_delta >= progress_threshold:
-            logger.debug(f"种子 {self.__get_torrent_desc(torrent_hash=torrent_hash, torrent_task=torrent_task)} "
-                         f"在超时窗口内进度增长 {progress_delta:.2f}%，已刷新下载进度基线")
-            self.__refresh_download_progress_baseline(torrent_task=torrent_task,
-                                                      progress_percent=progress_percent,
-                                                      current_time=current_time)
-            self.__clear_download_timeout_state(subscribe_task=subscribe_task,
-                                                subscribe=subscribe,
-                                                torrent_task=torrent_task)
-            return "wait", None
-
-        timeout_state = self.__record_download_timeout_failure(timeout_state=timeout_state,
-                                                               torrent_task=torrent_task,
-                                                               progress_delta=progress_delta,
-                                                               current_time=current_time)
-        retry_limit = self.__get_download_timeout_retry_limit()
-        reason = (f"订阅种子，下载时长 {download_time / 3600:.2f} 小时，"
-                  f"超时窗口 {self._download_timeout:g} 小时内进度增长 "
-                  f"{progress_delta:.2f}%，低于 {progress_threshold:g}%"
-                  f"（连续 {timeout_state.get('fail_count', 0)}/{retry_limit} 次）")
-        timeout_state["last_reason"] = reason
-        if timeout_state.get("fail_count", 0) >= retry_limit:
-            self.__mark_download_timeout_manual_review(timeout_state=timeout_state,
-                                                       torrent_task=torrent_task,
-                                                       current_time=current_time)
-            return "manual_review", reason
-
-        return "delete", reason
-
-    def __get_download_timeout_progress_threshold(self) -> float:
-        """
-        获取下载超时进度阈值，限制在0-100之间
-        """
-        try:
-            threshold = float(self._download_timeout_progress_threshold or 0)
-        except (TypeError, ValueError):
-            threshold = 5
-        return max(0, min(threshold, 100))
-
-    def __get_download_timeout_retry_limit(self) -> int:
-        """
-        获取连续超时保护次数，至少为1次
-        """
-        try:
-            retry_limit = int(self._download_timeout_retry_limit or 3)
-        except (TypeError, ValueError):
-            retry_limit = 3
-        return max(retry_limit, 1)
-
-    def __get_download_timeout_retry_window_seconds(self) -> float:
-        """
-        获取连续超时统计窗口
-        """
-        # 连续超时统计窗口必须独立于删除记录保留时间，否则短清理周期会让保护次数永远达不到上限。
-        retry_window_hours = max(24, float(self._download_timeout or 0) * self.__get_download_timeout_retry_limit())
-        return max(float(retry_window_hours), 0) * 3600
-
-    def __get_timeout_scope_key(self, subscribe: Subscribe, torrent_task: dict) -> str:
-        """
-        生成连续超时统计范围，电影按订阅统计，剧集按季和集数范围统计
-        """
-        media_type = self.__resolve_subscribe_media_type(subscribe=subscribe)
-        if media_type != MediaType.TV:
-            return "movie"
-
-        episodes = torrent_task.get("episodes") or []
-        if not isinstance(episodes, list):
-            episodes = [episodes]
-        episode_keys = sorted(str(episode) for episode in episodes if episode is not None)
-        episode_key = ",".join(episode_keys) if episode_keys else "unknown"
-        season = subscribe.season if subscribe and subscribe.season is not None else "unknown"
-        return f"tv:{season}:{episode_key}"
-
-    @staticmethod
-    def __get_download_timeout_state(subscribe_task: dict, scope_key: str) -> dict:
-        """
-        获取订阅范围内的连续超时状态
-        """
-        timeout_states = subscribe_task.setdefault("timeout_states", {})
-        return timeout_states.setdefault(scope_key, {})
-
-    @staticmethod
-    def __refresh_download_progress_baseline(torrent_task: dict, progress_percent: float,
-                                             current_time: float):
-        """
-        刷新种子下载进度观察窗口的基线
-        """
-        torrent_task["last_progress_percent"] = progress_percent
-        torrent_task["last_progress_check_time"] = current_time
-
-    def __record_download_timeout_failure(self, timeout_state: dict, torrent_task: dict,
-                                          progress_delta: float, current_time: float) -> dict:
-        """
-        记录一次低进度下载超时，超过统计窗口时重新开始计数
-        """
-        retry_window_seconds = self.__get_download_timeout_retry_window_seconds()
-        try:
-            window_start = float(timeout_state.get("window_start") or current_time)
-        except (TypeError, ValueError):
-            window_start = current_time
-        if retry_window_seconds and current_time - window_start > retry_window_seconds:
-            timeout_state.clear()
-            window_start = current_time
-
-        timeout_state["window_start"] = window_start
-        timeout_state["fail_count"] = int(timeout_state.get("fail_count") or 0) + 1
-        timeout_state["last_fail_time"] = current_time
-        timeout_state["last_torrent_hash"] = torrent_task.get("hash")
-        timeout_state["last_progress_delta"] = progress_delta
-        return timeout_state
-
-    def __mark_download_timeout_manual_review(self, timeout_state: dict, torrent_task: dict,
-                                              current_time: float):
-        """
-        标记连续超时达到上限后的人工处理保护期
-        """
-        timeout_state["ignore_until"] = current_time + self._download_timeout_ignore_hours * 3600
-        timeout_state["last_torrent_hash"] = torrent_task.get("hash")
-        timeout_state["notified_at"] = current_time
-
-    def __clear_download_timeout_state(self, subscribe_task: dict, subscribe: Subscribe, torrent_task: dict):
-        """
-        清理订阅范围内的连续超时状态
-        """
-        if not subscribe_task:
-            return
-        timeout_states = subscribe_task.get("timeout_states")
-        if not timeout_states:
-            return
-        scope_key = self.__get_timeout_scope_key(subscribe=subscribe, torrent_task=torrent_task)
-        timeout_states.pop(scope_key, None)
-
-    def __handle_download_timeout_manual_review(self, subscribe: Subscribe, torrent_task: dict, reason: str):
-        """
-        连续低进度超时达到上限时通知用户人工处理，保留当前种子
-        """
-        torrent_hash = torrent_task.get("hash")
-        torrent_desc = self.__get_torrent_desc(torrent_hash=torrent_hash, torrent_task=torrent_task)
-        logger.warning(f"{self.__format_subscribe(subscribe)} {torrent_desc} 已达到连续超时保护上限，"
-                       f"未来 {self._download_timeout_ignore_hours} 小时内保留种子并忽略自动超时删除")
-
-        if not self._notify:
-            return
-
-        msg_parts = []
-        if torrent_task.get("title"):
-            msg_parts.append(f"标题：{torrent_task.get('title')}")
-        if torrent_task.get("description"):
-            msg_parts.append(f"内容：{torrent_task.get('description')}")
-        msg_parts.extend([
-            f"原因：{reason}",
-            f"处理：已保留当前种子，{self._download_timeout_ignore_hours} 小时内不再自动删除，请手动判断"
-        ])
-        self.post_message(
-            mtype=NotificationType.Subscribe,
-            title=f"{self.__format_subscribe_desc(subscribe=subscribe)} 下载连续超时，请手动处理",
-            text="\n".join(part for part in msg_parts if part),
-            image=self.__get_subscribe_image(subscribe),
-        )
-
     def __clean_torrent_task_by_hash(self, subscribe: Subscribe, subscribe_task: dict,
                                      subscribe_torrent_tasks: list[dict], triggered_subscribe_ids: set,
                                      torrent_hash: str, torrent_task: dict, torrent_tasks: dict,
-                                     reason: str, reason_type: str = "timeout"):
+                                     reason: str):
         """
           清理并更新种子下载记录
 
@@ -4024,7 +2593,6 @@ block: []
           :param torrent_hash: 种子哈希值
           :param torrent_task: 当前种子任务信息
           :param torrent_tasks: 所有种子任务的字典
-          :param reason_type: 删除原因类型，用于区分超时、手工删除和Tracker异常
           """
         if torrent_hash in torrent_tasks:
             del torrent_tasks[torrent_hash]
@@ -4035,8 +2603,7 @@ block: []
 
         # 记录删除记录
         self.__with_lock_and_update_delete_tasks(method=self.__update_or_add_delete_tasks,
-                                                 torrent_task=torrent_task,
-                                                 reason_type=reason_type)
+                                                 torrent_task=torrent_task)
 
         # 处理删除后续逻辑
         self.__handle_timeout_seed_deletion(subscribe=subscribe, subscribe_task=subscribe_task,
@@ -4075,10 +2642,7 @@ block: []
         if not subscribe:
             return
 
-        media_type = self.__resolve_subscribe_media_type(subscribe=subscribe)
-        if media_type == MediaType.UNKNOWN:
-            logger.warning(f"{self.__format_subscribe(subscribe)} 媒体类型无效，跳过删除后续处理")
-            return
+        media_type = MediaType(subscribe.type)
         update_data = {}
         if media_type == MediaType.TV:
             episodes = torrent_task.get("episodes") or []
@@ -4160,20 +2724,20 @@ block: []
                     task for task in subscribe_task.get("torrent_tasks", []) if task.get("hash") != torrent_hash
                 ]
 
-    def __get_torrent_desc(self, torrent_hash: str, torrent_task: dict) -> str:
+    @staticmethod
+    def __get_torrent_desc(torrent_hash: str, torrent_task: dict) -> str:
         """
-        获取种子的日志描述信息，标题和副标题会截断以控制日志长度。
+        获取种子的描述信息
 
         :param torrent_hash: 种子hash
         :param torrent_task: 种子任务
 
         :return: 种子的描述字符串
         """
-        title_desc = self.__format_log_title_desc(
-            title=torrent_task.get("title"),
-            description=torrent_task.get("description"),
-        )
-        return f"{title_desc} ({torrent_hash})"
+        title = torrent_task.get("title")
+        description = torrent_task.get("description")
+        desc_part = f"| {description} " if description else ""
+        return f"{title}{desc_part}({torrent_hash})"
 
     def __reset_subscribe_task_state_when_updated(self, subscribe_tasks: dict, subscribe: Subscribe,
                                                   different_keys: dict):
@@ -4351,10 +2915,7 @@ block: []
             return False
 
         # 检查是否已经配置了无下载天数
-        subscribe_type = self.__resolve_subscribe_media_type(subscribe=subscribe)
-        if subscribe_type == MediaType.UNKNOWN:
-            logger.warning(f"{self.__format_subscribe(subscribe)} 媒体类型无效，跳过自动暂停（下载）处理")
-            return False
+        subscribe_type = MediaType(subscribe.type)
         if subscribe_type == MediaType.TV and self._auto_pause_tv_no_download_days is None:
             return False
         if subscribe_type == MediaType.MOVIE and self._auto_pause_movie_no_download_days is None:
@@ -4483,10 +3044,7 @@ block: []
             return
 
         # 检查是否已经配置了暂停天数
-        subscribe_type = self.__resolve_subscribe_media_type(subscribe=subscribe)
-        if subscribe_type == MediaType.UNKNOWN:
-            logger.warning(f"{self.__format_subscribe(subscribe)} 媒体类型无效，跳过自动暂停（播出）处理")
-            return
+        subscribe_type = MediaType(subscribe.type)
         if subscribe_type == MediaType.TV and (
                 self._auto_pause_tv_air_days is None or self._auto_pause_tv_latest_days is None):
             return
@@ -4858,11 +3416,13 @@ block: []
         meta = MetaInfo(subscribe.name)
         meta.year = subscribe.year
         meta.begin_season = subscribe.season or None
-        meta_type = self.__resolve_subscribe_media_type(subscribe=subscribe)
-        if meta_type == MediaType.UNKNOWN:
+        try:
+            if subscribe.type == '':
+                subscribe.type = MediaType.UNKNOWN
+            meta.type = MediaType(subscribe.type)
+        except ValueError:
             logger.error(f"订阅 {subscribe.name} 类型错误：{subscribe.type}")
             return None
-        meta.type = meta_type
         try:
             # 识别媒体信息
             mediainfo: MediaInfo = self.chain.recognize_media(
@@ -4916,7 +3476,8 @@ block: []
 
         return True
 
-    def __format_subscribe(self, subscribe: Subscribe) -> str:
+    @staticmethod
+    def __format_subscribe(subscribe: Subscribe) -> str:
         """
         格式化订阅信息
         """
@@ -4924,7 +3485,7 @@ block: []
             return "无效的订阅信息"
 
         # 基于订阅类型拼接不同的字符串格式
-        mediatype = self.__resolve_subscribe_media_type(subscribe=subscribe)
+        mediatype = MediaType(subscribe.type)
         year = subscribe.year if subscribe.year else "Unknown"
         if mediatype == MediaType.TV:
             return f"剧集: {subscribe.name} ({year}) 季{subscribe.season} [{subscribe.id}]"
@@ -5025,18 +3586,16 @@ block: []
                 del torrent_tasks[k]
 
     @staticmethod
-    def __update_or_add_delete_tasks(delete_tasks: dict, torrent_task: dict, reason_type: str = "timeout"):
+    def __update_or_add_delete_tasks(delete_tasks: dict, torrent_task: dict):
         """
         更新已删除种子任务
         :param delete_tasks: 已删除种子任务
         :param torrent_task: 种子任务
-        :param reason_type: 删除原因类型
         """
         if not torrent_task:
             return
         torrent_hash = torrent_task.get("hash")
         torrent_task["delete_time"] = time.time()
-        torrent_task["delete_type"] = reason_type
         delete_tasks[torrent_hash] = torrent_task
 
     def __update_subscribe_torrent_task(self, subscribe_tasks: dict, subscribe: Subscribe,
@@ -5239,14 +3798,15 @@ block: []
             return subscribe.poster.replace("original", "w500")
         return ""
 
-    def __get_subscribe_meta(self, subscribe: Subscribe) -> MetaInfo:
+    @staticmethod
+    def __get_subscribe_meta(subscribe: Subscribe) -> MetaInfo:
         """
         获取订阅元数据
         """
         meta = MetaInfo(subscribe.name)
         meta.year = subscribe.year
         meta.begin_season = subscribe.season or None
-        meta.type = self.__resolve_subscribe_media_type(subscribe=subscribe)
+        meta.type = MediaType(subscribe.type)
         return meta
 
     def process_best_version_complete(self, subscribes: list[Subscribe]):
@@ -5279,10 +3839,13 @@ block: []
             if not last_update_date_str:
                 logger.debug(f"{self.__format_subscribe(subscribe)} 没有有效的日期，跳过处理")
                 continue
+            
 
                 # 将字符串转换为 datetime 对象
             try:
                 last_update_date = datetime.strptime(last_update_date_str, "%Y-%m-%d %H:%M:%S")
+                if subscribe.username != "订阅助手" and not subscribe.last_update:
+                    last_update_date = datetime.now()
             except ValueError:
                 # 如果日期格式不匹配，跳过此条订阅
                 logger.warning(f"{self.__format_subscribe(subscribe)} 的日期格式不匹配，跳过处理")
@@ -5318,14 +3881,11 @@ block: []
             return
 
         # 如果订阅类型不在自动洗版的策略中，则直接返回
-        subscribe_type = self.__resolve_subscribe_media_type(subscribe=subscribe)
-        if subscribe_type == MediaType.UNKNOWN:
-            logger.warning(f"{self.__format_subscribe(subscribe)} 媒体类型无效，跳过自动洗版处理")
-            return
+        subscribe_type = MediaType(subscribe.type)
         if subscribe_type not in self._auto_best_types:
             logger.debug(f"{self.__format_subscribe(subscribe)}，尚未开启自动洗版，跳过处理")
             return
-
+        
         # 如果订阅类型在自动洗版的排除分类中，则直接返回
         if subscribe_type == MediaType.MOVIE:
             if str(mediainfo.category) in self._movie_exclude_type:
@@ -5358,8 +3918,6 @@ block: []
             return
 
         # 更新订阅字典
-        if self._best_version_full:
-            subscribe_dict["best_version_full"] = 1
         subscribe_dict["best_version"] = 1
         subscribe_dict["username"] = self.plugin_name
         subscribe_dict["state"] = "N"
@@ -5372,9 +3930,8 @@ block: []
         if mediainfo.type == MediaType.TV:
             subscribe_dict["lack_episode"] = subscribe_dict.get("total_episode")
 
-        # tmdb剧集组和当前版本疑似不兼容，暂时移除
-        subscribe_dict.pop("episode_group", None)
         # 添加订阅
+        subscribe_dict.pop('episode_group', None) # 参数去重
         sid, err_msg = self.subscribe_oper.add(mediainfo=mediainfo,
                                                **subscribe_dict)
 
@@ -5486,44 +4043,15 @@ block: []
         if not subscribe:
             return False
 
-        subscribe_type = self.__resolve_subscribe_media_type(subscribe=subscribe)
-        if subscribe_type == MediaType.UNKNOWN:
-            logger.warning(f"检测到无效订阅媒体类型，跳过处理：{self.__format_subscribe(subscribe)}")
-            return False
-
         # 检查订阅状态是否可处理
         if subscribe.state not in ["N", "R", "P"]:
-            logger.debug(
-                f"{self.__format_subscribe(subscribe)} 当前状态为 {subscribe.state}，状态不允许处理，跳过处理")
+            try:
+                logger.debug(
+                    f"{self.__format_subscribe(subscribe)} 当前状态为 {subscribe.state}，状态不允许处理，跳过处理")
+            except Exception as e:
+                pass
             return False
         return True
-
-    @staticmethod
-    def __resolve_subscribe_media_type(subscribe: Optional[Subscribe]) -> MediaType:
-        """
-        安全解析订阅媒体类型，兼容脏数据（如 None、空字符串、非法值）
-        """
-        if not subscribe:
-            return MediaType.UNKNOWN
-
-        media_type = getattr(subscribe, "type", None)
-        if isinstance(media_type, MediaType):
-            return media_type
-
-        if isinstance(media_type, str):
-            media_type = media_type.strip()
-
-        if not media_type:
-            logger.warning(f"订阅媒体类型为空，订阅ID={getattr(subscribe, 'id', None)}，名称={getattr(subscribe, 'name', None)}")
-            return MediaType.UNKNOWN
-
-        try:
-            return MediaType(media_type)
-        except ValueError:
-            logger.warning(
-                f"订阅媒体类型非法：{media_type}，订阅ID={getattr(subscribe, 'id', None)}，名称={getattr(subscribe, 'name', None)}"
-            )
-            return MediaType.UNKNOWN
 
     def __check_tv_season_completed(self, mediainfo: MediaInfo, season: int) -> bool:
         """
@@ -5655,10 +4183,7 @@ block: []
         """
         获取关联的下载记录
         """
-        subscribe_type = self.__resolve_subscribe_media_type(subscribe=subscribe)
-        if subscribe_type == MediaType.UNKNOWN:
-            logger.warning(f"{self.__format_subscribe(subscribe)} 媒体类型无效，跳过下载历史匹配")
-            return []
+        subscribe_type = MediaType(subscribe.type)
         if subscribe_type == MediaType.TV:
             meta = self.__get_subscribe_meta(subscribe)
             downloads = self.downloadhistory_oper.get_last_by(mtype=subscribe.type, title=subscribe.name,
@@ -5715,26 +4240,6 @@ block: []
         except ValueError:
             logger.error(f"day 格式错误：{day}")
             return None, None
-
-    @staticmethod
-    def __is_episode_range_covered(title: Optional[str], subtitle: Optional[str], subscribe: Subscribe) -> bool:
-        """
-        判断种子是否覆盖订阅剧集范围。
-        无法识别到剧集范围时，按合集处理以保持兼容。
-        """
-        meta = MetaInfo(title=title, subtitle=subtitle)
-        episodes = meta.episode_list
-        if not episodes:
-            return True
-
-        min_ep = min(episodes)
-        max_ep = max(episodes)
-        start_ep = subscribe.start_episode or 1
-        end_ep = subscribe.total_episode
-        if not end_ep:
-            return True
-
-        return min_ep <= start_ep and max_ep >= end_ep
 
     @staticmethod
     def __get_default_tracker_response():
