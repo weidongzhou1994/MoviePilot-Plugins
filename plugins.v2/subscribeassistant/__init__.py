@@ -57,7 +57,7 @@ class SubscribeAssistant(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/InfinityPacer/MoviePilot-Plugins/main/icons/subscribeassistant.png"
     # 插件版本
-    plugin_version = "3.13.2"
+    plugin_version = "3.13.3"
     # 插件作者
     plugin_author = "InfinityPacer"
     # 作者主页
@@ -2512,8 +2512,12 @@ block: []
         """
         下载检查
         """
-        if not (self._auto_download_delete or self._manual_delete_listen or
-                self._tracker_response_listen or self._auto_download_pending):
+        try:
+            if not (self._auto_download_delete or self._manual_delete_listen or
+                    self._tracker_response_listen or self._auto_download_pending):
+                return
+        except Exception as e:
+            logger.error(f"下载检查执行失败，错误信息：{str(e)}")
             return
 
         logger.info("开始清理超时种子记录...")
@@ -5283,6 +5287,8 @@ block: []
                 # 将字符串转换为 datetime 对象
             try:
                 last_update_date = datetime.strptime(last_update_date_str, "%Y-%m-%d %H:%M:%S")
+                if subscribe.username != "订阅助手" and not subscribe.last_update:
+                    last_update_date = datetime.now()
             except ValueError:
                 # 如果日期格式不匹配，跳过此条订阅
                 logger.warning(f"{self.__format_subscribe(subscribe)} 的日期格式不匹配，跳过处理")
